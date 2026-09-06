@@ -1,0 +1,32 @@
+# Conversation Memory RAG — Python 3.12 (conda env: convmem)
+#
+# Install:  pip install -r requirements.txt
+#
+# Increment 1 (parser + storage + tests) only needs the "Core" + "Dev" blocks.
+# The Embeddings / Vector / UI blocks are used from increment 2 onward; they are
+# listed here so a single install prepares the whole of Phase 1.
+
+# ----- Core -----
+python-dotenv==1.0.1
+python-dateutil==2.9.0.post0
+requests==2.32.3
+numpy>=1.26,<3
+
+# ----- Embeddings & vector search (increment 2) -----
+sentence-transformers==3.3.1
+torch==2.5.1
+faiss-cpu==1.9.0.post1
+
+# ----- UI (increment 2) -----
+streamlit==1.41.1
+
+# ----- Dev -----
+pytest==8.3.4
+
+# ----- Deferred to later phases (do NOT install yet) -----
+# Phase 2 (hybrid retrieval / rerank):
+#   rank-bm25==0.2.2
+# Phase 3 (knowledge graph):
+#   spacy==3.8.2   (+  python -m spacy download en_core_web_sm)
+#   networkx==3.4.2
+#   python-louvain==0.16

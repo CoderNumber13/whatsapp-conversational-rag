@@ -1,0 +1,102 @@
+"""Central configuration.
+
+Values come from environment variables (optionally loaded from a local ``.env``),
+with safe defaults so the parser/storage layer works with zero setup.
+Nothing here is provider-specific beyond a name the caller can switch.
+"""
+
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass, field
+from pathlib import Path
+
+try:  # optional: .env support
+    from dotenv import load_dotenv
+
+    load_dotenv()
+except Exception:  # pragma: no cover - dotenv is optional at runtime
+    pass
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _get(name: str, default: str) -> str:
+    return os.environ.get(name, default)
+
+
+def _get_int(name: str, default: int) -> int:
+    try:
+        return int(os.environ[name])
+    except (KeyError, ValueError):
+        return default
+
+
+def _get_float(name: str, default: float) -> float:
+    try:
+        return float(os.environ[name])
+    except (KeyError, ValueError):
+        return default
+
+
+def _get_bool(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _get_list(name: str, default: list[str]) -> list[str]:
+    raw = os.environ.get(name)
+    if not raw:
+        return list(default)
+    return [item.strip() for item in raw.split(",") if item.strip()]
+
+
+@dataclass(frozen=True)
+class Config:
+    # Identity
+    me_names: list[str] = field(default_factory=lambda: _get_list("ME_NAMES", ["Me"]))
+
+    # Storage
+    db_path: Path = field(
+        default_factory=lambda: (REPO_ROOT / _get("DB_PATH", "data/private/conversation_memory.db"))
+    )
+    index_dir: Path = field(
+        default_factory=lambda: (REPO_ROOT / _get("INDEX_DIR", "data/private/index"))
+    )
+
+    # Embeddings (increment 2)
+    embedding_model: str = field(
+        default_factory=lambda: _get("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
+    )
+    embedding_device: str = field(default_factory=lambda: _get("EMBEDDING_DEVICE", "cpu"))
+
+    # LLM (increment 2)
+    llm_provider: str = field(default_factory=lambda: _get("LLM_PROVIDER", "ollama"))
+    ollama_host: str = field(default_factory=lambda: _get("OLLAMA_HOST", "http://localhost:11434"))
+    ollama_model: str = field(default_factory=lambda: _get("OLLAMA_MODEL", "llama3.1:8b"))
+    openai_api_key: str = field(default_factory=lambda: _get("OPENAI_API_KEY", ""))
+    openai_base_url: str = field(
+        default_factory=lambda: _get("OPENAI_BASE_URL", "https://api.openai.com/v1")
+    )
+    openai_model: str = field(default_factory=lambda: _get("OPENAI_MODEL", "gpt-4o-mini"))
+
+    # Chunking
+    chunk_size_messages: int = field(default_factory=lambda: _get_int("CHUNK_SIZE_MESSAGES", 12))
+    chunk_overlap_messages: int = field(
+        default_factory=lambda: _get_int("CHUNK_OVERLAP_MESSAGES", 3)
+    )
+
+    # Retrieval / answering
+    retrieval_top_k: int = field(default_factory=lambda: _get_int("RETRIEVAL_TOP_K", 8))
+    min_retrieval_score: float = field(
+        default_factory=lambda: _get_float("MIN_RETRIEVAL_SCORE", 0.25)
+    )
+
+    # Logging
+    log_level: str = field(default_factory=lambda: _get("LOG_LEVEL", "INFO"))
+    log_redact_text: bool = field(default_factory=lambda: _get_bool("LOG_REDACT_TEXT", True))
+
+
+CONFIG = Config()
