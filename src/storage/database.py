@@ -113,6 +113,22 @@ def _now() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
 
+def row_to_chunk(r: sqlite3.Row, message_ids: Optional[list[str]] = None) -> Chunk:
+    return Chunk(
+        chunk_id=r["chunk_id"],
+        conversation_id=r["conversation_id"],
+        seq_start=r["seq_start"],
+        seq_end=r["seq_end"],
+        ts_start=datetime.fromisoformat(r["ts_start"]),
+        ts_end=datetime.fromisoformat(r["ts_end"]),
+        participants=json.loads(r["participants"]),
+        message_ids=message_ids if message_ids is not None else [],
+        text=r["text"],
+        content_hash=r["content_hash"],
+        token_estimate=r["token_estimate"],
+    )
+
+
 def row_to_message(r: sqlite3.Row) -> Message:
     """Rebuild a typed :class:`Message` from a ``messages`` row."""
     return Message(
@@ -315,6 +331,48 @@ class Database:
             self.conn.execute(f"DELETE FROM {table} WHERE chunk_id = ?", (chunk_id,))
         if commit:
             self.conn.commit()
+
+    def commit(self) -> None:
+        self.conn.commit()
+
+    # --- chunk reads ------------------------------------------------
+    def chunk_hashes_for_conversation(self, conversation_id: str) -> dict[str, str]:
+        return {
+            r["chunk_id"]: r["content_hash"]
+            for r in self.conn.execute(
+                "SELECT chunk_id, content_hash FROM chunks WHERE conversation_id = ?",
+                (conversation_id,),
+            ).fetchall()
+        }
+
+    def _chunk_message_ids(self, chunk_id: str) -> list[str]:
+        return [
+            r["message_id"]
+            for r in self.conn.execute(
+                "SELECT message_id FROM chunk_messages WHERE chunk_id = ? ORDER BY ord",
+                (chunk_id,),
+            ).fetchall()
+        ]
+
+    def get_chunk(self, chunk_id: str) -> Optional[Chunk]:
+        r = self.conn.execute(
+            "SELECT * FROM chunks WHERE chunk_id = ?", (chunk_id,)
+        ).fetchone()
+        if r is None:
+            return None
+        return row_to_chunk(r, self._chunk_message_ids(chunk_id))
+
+    def get_chunks_by_ids(self, ids: Sequence[str]) -> list[Chunk]:
+        order = {cid: i for i, cid in enumerate(ids)}
+        chunks = [c for cid in ids if (c := self.get_chunk(cid)) is not None]
+        return sorted(chunks, key=lambda c: order.get(c.chunk_id, 1 << 30))
+
+    def all_chunks(self) -> list[Chunk]:
+        rows = self.conn.execute("SELECT * FROM chunks ORDER BY conversation_id, seq_start").fetchall()
+        return [row_to_chunk(r, self._chunk_message_ids(r["chunk_id"])) for r in rows]
+
+    def count_chunks(self) -> int:
+        return self._count("chunks")
 
     # --- reads -------------------------------------------------------
     def _count(self, table: str) -> int:
