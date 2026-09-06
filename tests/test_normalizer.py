@@ -60,10 +60,24 @@ def test_group_detected_by_participant_count():
     assert conv.message_count == len(msgs)
 
 
-def test_exact_duplicate_messages_are_deduped():
-    conv, msgs = _norm(ONE_TO_ONE + "25/07/2026, 20:02 - Rahul: earlier message\n")
-    # the repeated (ts, sender, text) collapses to one row
-    assert sum(m.text == "earlier message" for m in msgs) == 1
+def test_repeated_identical_messages_kept_as_distinct_occurrences():
+    # WhatsApp Android has minute precision; "ok"/"ok" in one minute is real data.
+    _, msgs = _norm(
+        "25/07/2026, 20:02 - Rahul: ok\n"
+        "25/07/2026, 20:02 - Rahul: ok\n"
+        "25/07/2026, 20:02 - Rahul: ok\n"
+    )
+    oks = [m for m in msgs if m.text == "ok"]
+    assert len(oks) == 3
+    assert [m.occurrence for m in oks] == [0, 1, 2]
+    assert len({m.message_id for m in oks}) == 3  # distinct ids
+
+
+def test_identical_lines_get_stable_distinct_ids_across_runs():
+    text = "25/07/2026, 20:02 - Rahul: ok\n25/07/2026, 20:02 - Rahul: ok\n"
+    _, a = _norm(text)
+    _, b = _norm(text)
+    assert [m.message_id for m in a] == [m.message_id for m in b]
 
 
 def test_message_id_stable_across_runs():

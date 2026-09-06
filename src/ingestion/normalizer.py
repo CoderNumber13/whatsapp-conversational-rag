@@ -46,9 +46,10 @@ def normalize_export(
     ordered = sorted(enumerate(parsed.messages), key=lambda t: (t[1].dt, t[0]))
 
     messages: list[Message] = []
-    seen_ids: set[str] = set()
     senders: list[str] = []
     group_hint = False
+    # nth identical (timestamp, sender, text) seen so far in this export
+    occ_counts: dict[tuple[str, str, str], int] = {}
 
     for _, pm in ordered:
         sender_raw = pm.sender or ""
@@ -57,6 +58,10 @@ def normalize_export(
 
         if pm.is_system and any(h in pm.text.lower() for h in _GROUP_CREATE_HINTS):
             group_hint = True
+
+        occ_key = (pm.dt.isoformat(), sender_raw, pm.text)
+        occ = occ_counts.get(occ_key, 0)
+        occ_counts[occ_key] = occ + 1
 
         msg = Message(
             conversation_id=conv_id,
@@ -74,14 +79,13 @@ def normalize_export(
             src_file=src_file,
             src_line_start=pm.line_start,
             src_line_end=pm.line_end,
+            occurrence=occ,
         )
-        if msg.message_id in seen_ids:  # exact duplicate (e.g. re-exported file)
-            continue
-        seen_ids.add(msg.message_id)
         messages.append(msg)
         if sender and not pm.is_system:
             senders.append(sender)
 
+    # Provisional local ordering; the DB recomputes seq across all imports.
     for i, msg in enumerate(messages):
         msg.seq = i
 

@@ -82,10 +82,28 @@ class Config:
     )
     openai_model: str = field(default_factory=lambda: _get("OPENAI_MODEL", "gpt-4o-mini"))
 
+    embedding_batch_size: int = field(
+        default_factory=lambda: _get_int("EMBEDDING_BATCH_SIZE", 64)
+    )
+
+    # LLM generation
+    llm_temperature: float = field(default_factory=lambda: _get_float("LLM_TEMPERATURE", 0.0))
+    llm_max_tokens: int = field(default_factory=lambda: _get_int("LLM_MAX_TOKENS", 800))
+    llm_timeout_s: int = field(default_factory=lambda: _get_int("LLM_TIMEOUT_S", 120))
+    # llama3.1 defaults to a 2048-token context in Ollama unless told otherwise.
+    ollama_num_ctx: int = field(default_factory=lambda: _get_int("OLLAMA_NUM_CTX", 8192))
+
     # Chunking
+    chunk_strategy: str = field(default_factory=lambda: _get("CHUNK_STRATEGY", "fixed_count"))
     chunk_size_messages: int = field(default_factory=lambda: _get_int("CHUNK_SIZE_MESSAGES", 12))
     chunk_overlap_messages: int = field(
         default_factory=lambda: _get_int("CHUNK_OVERLAP_MESSAGES", 3)
+    )
+    chunk_time_window_minutes: int = field(
+        default_factory=lambda: _get_int("CHUNK_TIME_WINDOW_MINUTES", 45)
+    )
+    min_messages_per_chunk: int = field(
+        default_factory=lambda: _get_int("MIN_MESSAGES_PER_CHUNK", 4)
     )
 
     # Retrieval / answering
@@ -93,10 +111,24 @@ class Config:
     min_retrieval_score: float = field(
         default_factory=lambda: _get_float("MIN_RETRIEVAL_SCORE", 0.25)
     )
+    context_window_messages: int = field(
+        default_factory=lambda: _get_int("CONTEXT_WINDOW_MESSAGES", 3)
+    )
+    max_context_chunks: int = field(default_factory=lambda: _get_int("MAX_CONTEXT_CHUNKS", 8))
+
+    # Paths
+    uploads_dir: Path = field(
+        default_factory=lambda: (REPO_ROOT / _get("UPLOADS_DIR", "data/private/uploads"))
+    )
 
     # Logging
     log_level: str = field(default_factory=lambda: _get("LOG_LEVEL", "INFO"))
     log_redact_text: bool = field(default_factory=lambda: _get_bool("LOG_REDACT_TEXT", True))
+
+    @classmethod
+    def reload(cls) -> "Config":
+        """Rebuild from the current environment (``.env`` is re-read on import only)."""
+        return cls()
 
 
 CONFIG = Config()
