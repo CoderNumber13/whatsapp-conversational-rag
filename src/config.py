@@ -90,8 +90,10 @@ class Config:
     llm_temperature: float = field(default_factory=lambda: _get_float("LLM_TEMPERATURE", 0.0))
     llm_max_tokens: int = field(default_factory=lambda: _get_int("LLM_MAX_TOKENS", 800))
     llm_timeout_s: int = field(default_factory=lambda: _get_int("LLM_TIMEOUT_S", 120))
-    # llama3.1 defaults to a 2048-token context in Ollama unless told otherwise.
-    ollama_num_ctx: int = field(default_factory=lambda: _get_int("OLLAMA_NUM_CTX", 8192))
+    # llama3.1 defaults to 2048 in Ollama; 4096 gives RAG-prompt headroom without
+    # inflating the KV-cache allocation on low-RAM machines. Drop to 2048 (or use a
+    # 3B model) if Ollama fails to allocate; raise to 8192 with RAM to spare.
+    ollama_num_ctx: int = field(default_factory=lambda: _get_int("OLLAMA_NUM_CTX", 4096))
 
     # Chunking
     chunk_strategy: str = field(default_factory=lambda: _get("CHUNK_STRATEGY", "fixed_count"))
