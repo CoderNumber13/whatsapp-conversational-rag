@@ -23,7 +23,7 @@ from src.config import CONFIG, Config
 from src.ingestion.normalizer import WhatsAppExportSource
 from src.llm.base import LLMClient
 from src.llm.factory import get_llm
-from src.llm.prompts import NOT_FOUND_TOKEN, SYSTEM_PROMPT, build_user_prompt
+from src.llm.prompts import SYSTEM_PROMPT, build_user_prompt, is_not_found
 from src.retrieval.indexer import EmbeddingIndexer, IndexSyncResult
 from src.retrieval.retriever import RetrievalFilters, RetrievedChunk, Retriever
 from src.storage.database import Database
@@ -141,7 +141,7 @@ class RagPipeline:
         user_prompt = build_user_prompt(question, retrieved, filters_note=filters_note)
         resp = self.llm.complete(SYSTEM_PROMPT, user_prompt, max_tokens=self.config.llm_max_tokens)
 
-        if resp.text.strip().rstrip(".").upper() == NOT_FOUND_TOKEN:
+        if is_not_found(resp.text):
             return Answer(
                 text="I couldn't find anything about that in your chats.",
                 supported=False,
