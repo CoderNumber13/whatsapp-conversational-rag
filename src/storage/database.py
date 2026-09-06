@@ -374,6 +374,62 @@ class Database:
     def count_chunks(self) -> int:
         return self._count("chunks")
 
+    # --- embedding metadata (chunk <-> faiss id, staleness) -------
+    def embedding_meta_map(self) -> dict[str, tuple[str, str, int]]:
+        """chunk_id -> (content_hash, embedding_model, faiss_id)."""
+        return {
+            r["chunk_id"]: (r["content_hash"], r["embedding_model"], r["faiss_id"])
+            for r in self.conn.execute(
+                "SELECT chunk_id, content_hash, embedding_model, faiss_id FROM embedding_meta"
+            ).fetchall()
+        }
+
+    def upsert_embedding_meta(
+        self, chunk_id: str, content_hash: str, model: str, dim: int, faiss_id: int,
+        *, commit: bool = True,
+    ) -> None:
+        self.conn.execute(
+            """
+            INSERT INTO embedding_meta
+                (chunk_id, content_hash, embedding_model, dim, faiss_id, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(chunk_id) DO UPDATE SET
+                content_hash=excluded.content_hash,
+                embedding_model=excluded.embedding_model,
+                dim=excluded.dim,
+                faiss_id=excluded.faiss_id,
+                created_at=excluded.created_at
+            """,
+            (chunk_id, content_hash, model, dim, faiss_id, _now()),
+        )
+        if commit:
+            self.conn.commit()
+
+    def delete_embedding_meta(self, chunk_id: str, *, commit: bool = True) -> None:
+        self.conn.execute("DELETE FROM embedding_meta WHERE chunk_id = ?", (chunk_id,))
+        if commit:
+            self.conn.commit()
+
+    def clear_embedding_meta(self, *, commit: bool = True) -> None:
+        self.conn.execute("DELETE FROM embedding_meta")
+        if commit:
+            self.conn.commit()
+
+    def max_faiss_id(self) -> int:
+        return self.conn.execute("SELECT COALESCE(MAX(faiss_id), 0) FROM embedding_meta").fetchone()[0]
+
+    def chunk_ids_for_faiss(self, faiss_ids: Sequence[int]) -> dict[int, str]:
+        if not faiss_ids:
+            return {}
+        qs = ",".join("?" * len(faiss_ids))
+        return {
+            r["faiss_id"]: r["chunk_id"]
+            for r in self.conn.execute(
+                f"SELECT faiss_id, chunk_id FROM embedding_meta WHERE faiss_id IN ({qs})",
+                tuple(faiss_ids),
+            ).fetchall()
+        }
+
     # --- reads -------------------------------------------------------
     def _count(self, table: str) -> int:
         return self.conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
