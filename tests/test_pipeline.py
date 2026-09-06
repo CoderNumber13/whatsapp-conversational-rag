@@ -51,6 +51,32 @@ def test_ingest_report(tmp_path, monkeypatch):
     pipe.close()
 
 
+def test_context_is_capped_and_budgeted(tmp_path, monkeypatch):
+    # tiny ctx budget -> pipeline must trim the chunks it sends to the LLM
+    pipe, cfg, _, _ = _build(
+        tmp_path, monkeypatch, MIN_RETRIEVAL_SCORE="-1",
+        MAX_CONTEXT_CHUNKS="6", OLLAMA_NUM_CTX="700", LLM_MAX_TOKENS="100",
+        LLM_PROVIDER="ollama",
+    )
+    seen = {}
+
+    class _Spy:
+        model = "spy"
+
+        def complete(self, system, user, **opts):
+            seen["n_excerpts"] = user.count("### Excerpt ")
+            from src.llm.base import LLMResponse
+
+            return LLMResponse(text="ok [m:%s]" % pipe.db.all_chunks()[0].message_ids[0], model="spy")
+
+    pipe._llm = _Spy()
+    retrieved = pipe.retriever.retrieve("placements internship project", k=8)
+    assert len(retrieved) >= 3  # there is more than we can send
+    pipe.answer("placements internship project")
+    assert 1 <= seen["n_excerpts"] < len(retrieved)  # trimmed
+    pipe.close()
+
+
 def test_reingest_is_idempotent(tmp_path, monkeypatch):
     pipe, cfg, report, files = _build(tmp_path, monkeypatch)
     again = pipe.ingest(files, me_names=["Me"])
