@@ -19,12 +19,14 @@ class OllamaClient(LLMClient):
         num_ctx: int = 8192,
         temperature: float = 0.0,
         timeout_s: int = 120,
+        num_gpu: int = -1,
     ) -> None:
         self.host = host.rstrip("/")
         self.model = model
         self.num_ctx = num_ctx
         self.temperature = temperature
         self.timeout_s = timeout_s
+        self.num_gpu = num_gpu  # -1 = let Ollama decide; 0 = force CPU
 
     def complete(self, system: str, user: str, **opts) -> LLMResponse:
         payload = {
@@ -40,6 +42,8 @@ class OllamaClient(LLMClient):
                 "num_predict": opts.get("max_tokens", -1),
             },
         }
+        if self.num_gpu >= 0:
+            payload["options"]["num_gpu"] = self.num_gpu
         try:
             resp = requests.post(
                 f"{self.host}/api/chat", json=payload, timeout=self.timeout_s

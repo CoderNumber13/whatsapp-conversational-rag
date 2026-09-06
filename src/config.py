@@ -94,6 +94,10 @@ class Config:
     # inflating the KV-cache allocation on low-RAM machines. Drop to 2048 (or use a
     # 3B model) if Ollama fails to allocate; raise to 8192 with RAM to spare.
     ollama_num_ctx: int = field(default_factory=lambda: _get_int("OLLAMA_NUM_CTX", 4096))
+    # -1 = let Ollama decide (default). Set to 0 to force CPU-only, e.g. when the
+    # CUDA runner crashes ("shared object initialization failed" / 0xc0000409)
+    # because the NVIDIA driver is older than Ollama's bundled CUDA runtime.
+    ollama_num_gpu: int = field(default_factory=lambda: _get_int("OLLAMA_NUM_GPU", -1))
 
     # Chunking
     chunk_strategy: str = field(default_factory=lambda: _get("CHUNK_STRATEGY", "fixed_count"))
