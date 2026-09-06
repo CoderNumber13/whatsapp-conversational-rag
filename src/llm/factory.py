@@ -19,6 +19,7 @@ def get_llm(config: Config = CONFIG) -> LLMClient:
             num_ctx=config.ollama_num_ctx,
             temperature=config.llm_temperature,
             timeout_s=config.llm_timeout_s,
+            num_gpu=config.ollama_num_gpu,
         )
     if provider == "openai":
         from src.llm.openai_client import OpenAIClient

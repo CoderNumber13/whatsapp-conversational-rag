@@ -32,9 +32,11 @@ pip install -r requirements.txt
 # 2. local LLM
 #    install Ollama for Windows, then:
 ollama pull llama3.1:8b
-#    On a low-RAM machine (Ollama "failed to allocate buffer"), either set
-#    OLLAMA_NUM_CTX=2048 in .env, or use a small model:
-#    ollama pull llama3.2:3b   # then OLLAMA_MODEL=llama3.2:3b
+#    Low RAM (Ollama "failed to allocate buffer"): set OLLAMA_NUM_CTX=2048 in
+#      .env, or use a small model: ollama pull llama3.2:3b  (OLLAMA_MODEL=llama3.2:3b)
+#    CUDA runner crash ("shared object initialization failed" / exit 0xc0000409,
+#      old NVIDIA driver vs Ollama's bundled CUDA): set OLLAMA_NUM_GPU=0 in .env
+#      to force CPU, or update the NVIDIA driver.
 
 # 3. config
 cp .env.example .env        # then edit ME_NAMES to your WhatsApp display name(s)
