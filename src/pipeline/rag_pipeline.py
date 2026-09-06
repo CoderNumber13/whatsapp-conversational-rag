@@ -136,9 +136,12 @@ class RagPipeline:
                 abstained=True,
             )
 
-        valid_ids = self._context_ids(retrieved)
+        # Only the strongest chunks go to the LLM — and only as many as fit the
+        # model's context. `retrieved` (full list) is still returned for the UI.
+        context = self._fit_context(question, retrieved, filters)
+        valid_ids = self._context_ids(context)
         filters_note = _filters_note(filters)
-        user_prompt = build_user_prompt(question, retrieved, filters_note=filters_note)
+        user_prompt = build_user_prompt(question, context, filters_note=filters_note)
         resp = self.llm.complete(SYSTEM_PROMPT, user_prompt, max_tokens=self.config.llm_max_tokens)
 
         if is_not_found(resp.text):
@@ -162,6 +165,26 @@ class RagPipeline:
         )
 
     # --- helpers -------------------------------------------------
+    def _fit_context(
+        self, question: str, retrieved: list[RetrievedChunk], filters
+    ) -> list[RetrievedChunk]:
+        """Cap to MAX_CONTEXT_CHUNKS, then drop the weakest until the built
+        prompt is expected to fit the model's context (minus the answer budget)."""
+        chunks = retrieved[: max(1, self.config.max_context_chunks)]
+
+        budget_tokens = 4096
+        if self.config.llm_provider == "ollama":
+            budget_tokens = self.config.ollama_num_ctx
+        headroom = budget_tokens - self.config.llm_max_tokens - 256  # sys prompt + slack
+        headroom = max(headroom, 512)
+
+        while len(chunks) > 1:
+            approx = len(build_user_prompt(question, chunks, filters_note=_filters_note(filters))) // 4
+            if approx <= headroom:
+                break
+            chunks = chunks[:-1]
+        return chunks
+
     @staticmethod
     def _context_ids(retrieved: list[RetrievedChunk]) -> set[str]:
         ids: set[str] = set()
