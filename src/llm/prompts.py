@@ -13,18 +13,34 @@ from src.storage.models import Message
 
 NOT_FOUND_TOKEN = "NOT_FOUND"
 
+
+def is_not_found(text: str) -> bool:
+    """True if the model's reply is a 'not found' signal, tolerating spacing /
+    punctuation / casing variants ('NOTFOUND', 'not found.', 'NOT_FOUND')."""
+    squashed = "".join(ch for ch in text.upper() if ch.isalnum())
+    return squashed in {"NOTFOUND", "NOTFOUNDINCHATS"} or (
+        len(text.strip()) <= 40 and squashed.startswith("NOTFOUND")
+    )
+
+
 SYSTEM_PROMPT = (
-    "You answer questions about the user's own chat history.\n"
+    "You answer questions about the user's own chat history using only the "
+    "message excerpts you are given.\n\n"
+    "The excerpts are real messages already retrieved as relevant to the "
+    "question. Read them carefully — if they contain the answer, give it.\n\n"
     "Rules:\n"
-    "1. Use ONLY the numbered excerpts below. Do not use outside knowledge.\n"
-    "2. End every factual sentence with one or more citations of the form "
-    "[m:<id>], copied exactly from the excerpts that support it.\n"
-    "3. If the excerpts do not contain the answer, reply with exactly "
-    f"{NOT_FOUND_TOKEN} and nothing else.\n"
-    "4. Separate what was explicitly said from your own inference. Prefix any "
-    "inferred sentence with 'Likely: '.\n"
-    "5. Be concise. Do not quote message ids anywhere except inside [m:<id>] "
-    "citations. Never invent names, dates, or ids.\n"
+    "1. Use ONLY the excerpts. No outside knowledge, no guessing.\n"
+    "2. After each factual sentence, put the citation(s) that support it: the "
+    "[m:<id>] tag(s) copied verbatim from the excerpt lines you used.\n"
+    "3. Prefix any sentence that is your inference (not explicitly stated) with "
+    "'Likely: '.\n"
+    "4. Only if NONE of the excerpts address the question, reply with exactly "
+    f"{NOT_FOUND_TOKEN} (underscore included) and nothing else.\n"
+    "5. Be concise. Never write a message id except inside a [m:<id>] citation.\n\n"
+    "Example excerpt line:\n"
+    "[2026-08-17 09:16] Rahul: Joining date is 2 September. [m:9efd65ab13262592]\n"
+    "Example answer:\n"
+    "Rahul's joining date is 2 September [m:9efd65ab13262592].\n"
 )
 
 
