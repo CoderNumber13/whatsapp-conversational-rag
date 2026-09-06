@@ -40,6 +40,76 @@ class _StubLLM:
         return LLMResponse(text=self._text, model=self.model)
 
 
+def _pipeline_over(tmp_path, monkeypatch, export_text, *, me="You", **env):
+    """A pipeline holding one ad-hoc WhatsApp export (mock embedder + LLM)."""
+    monkeypatch.setenv("EMBEDDING_MODEL", "mock-64")
+    monkeypatch.setenv("LLM_PROVIDER", "mock")
+    monkeypatch.setenv("INDEX_DIR", str(tmp_path / "idx"))
+    monkeypatch.setenv("DB_PATH", str(tmp_path / "cm.db"))
+    monkeypatch.setenv("MIN_MESSAGES_PER_CHUNK", "2")
+    monkeypatch.setenv("MIN_RETRIEVAL_SCORE", "-1")
+    for k, v in env.items():
+        monkeypatch.setenv(k, str(v))
+    f = tmp_path / "WhatsApp Chat with Karan.txt"
+    f.write_text(export_text, encoding="utf-8")
+    pipe = RagPipeline(Config.reload())
+    pipe.ingest([f], me_names=[me])
+    return pipe
+
+
+# --- regression: "gmail password" query when the data has no password -----
+# Original report: asking for the password of a Gmail account returned
+# "no record found". Trace showed every stage worked: retrieval surfaced the
+# gmail conversation and it was in the LLM prompt, but the chat only contains
+# "make a new gmail" + the address — no password exists anywhere in the data.
+# The system correctly refused to invent one. This test locks that in.
+
+_GMAIL_EXPORT = """\
+21/08/2026, 13:34 - Karan: synthetic sample message
+21/08/2026, 13:34 - You: synthetic sample message
+21/08/2026, 13:40 - You: synthetic sample message
+21/08/2026, 14:29 - You: @sample7handle
+21/08/2026, 14:30 - You: testuser.sample@example.com
+21/08/2026, 16:47 - Karan: synthetic sample message
+21/08/2026, 17:41 - You: synthetic sample message
+"""
+
+
+def test_gmail_password_query_does_not_fabricate_when_absent(tmp_path, monkeypatch):
+    pipe = _pipeline_over(tmp_path, monkeypatch, _GMAIL_EXPORT)
+
+    # the corpus genuinely contains no password (root cause of the report)
+    assert pipe.db.get_messages(contains="password") == []
+    assert pipe.db.get_messages(contains="pwd") == []
+
+    # retrieval is NOT the failing stage: the gmail conversation is retrievable
+    hits = pipe.retriever.retrieve(
+        "password of the new gmail account I created for Karan", k=5
+    )
+    assert hits, "retrieval returned nothing at all"
+    assert any("gmail" in h.chunk.text.lower() for h in hits), "gmail chunk not retrieved"
+
+    # a grounded LLM sees the gmail messages but no password -> NOT_FOUND.
+    pipe._llm = _StubLLM("NOT_FOUND")
+    ans = pipe.answer(
+        "What is the password of the new Gmail account I created for Karan?"
+    )
+    assert ans.abstained is False        # threshold was cleared; the LLM was consulted
+    assert ans.supported is False        # nothing to support an answer
+    assert ans.citations == []           # and nothing fabricated
+    assert "password" not in ans.text.lower()
+
+
+def test_gmail_password_query_drops_hallucinated_password(tmp_path, monkeypatch):
+    """If a future model *invents* a password with a made-up citation, the
+    citation validator must drop it and the answer must not count as supported."""
+    pipe = _pipeline_over(tmp_path, monkeypatch, _GMAIL_EXPORT)
+    pipe._llm = _StubLLM("The password is Hunter2! [m:deadbeefdeadbeef].")
+    ans = pipe.answer("What is the Gmail password?")
+    assert ans.citations == []
+    assert ans.supported is False
+
+
 # --- ingest --------------------------------------------------------
 
 def test_ingest_report(tmp_path, monkeypatch):
