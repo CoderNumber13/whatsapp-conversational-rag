@@ -418,6 +418,61 @@ class Database:
     def max_faiss_id(self) -> int:
         return self.conn.execute("SELECT COALESCE(MAX(faiss_id), 0) FROM embedding_meta").fetchone()[0]
 
+    def filter_chunk_ids(
+        self,
+        *,
+        conversation_id: Optional[str] = None,
+        sender: Optional[str] = None,
+        participant: Optional[str] = None,
+        date_from: Optional[datetime] = None,
+        date_to: Optional[datetime] = None,
+        source: Optional[str] = None,
+        is_group: Optional[bool] = None,
+    ) -> Optional[set[str]]:
+        """Chunk ids matching the metadata constraints, or ``None`` if none given
+        (meaning "no restriction"). ``sender`` = authored a message in the chunk;
+        ``participant`` = appears in the chunk's participant set."""
+        clauses: list[str] = []
+        params: list = []
+        if conversation_id:
+            clauses.append("c.conversation_id = ?")
+            params.append(conversation_id)
+        if date_from:
+            clauses.append("c.ts_end >= ?")
+            params.append(date_from.isoformat())
+        if date_to:
+            clauses.append("c.ts_start <= ?")
+            params.append(date_to.isoformat())
+        if participant:
+            clauses.append(
+                "c.chunk_id IN (SELECT chunk_id FROM chunk_participants "
+                "WHERE LOWER(display_name) = ?)"
+            )
+            params.append(participant.lower())
+        if sender:
+            clauses.append(
+                "c.chunk_id IN (SELECT cm.chunk_id FROM chunk_messages cm "
+                "JOIN messages m ON m.message_id = cm.message_id WHERE LOWER(m.sender) = ?)"
+            )
+            params.append(sender.lower())
+        if source is not None or is_group is not None:
+            sub = ["conv.conversation_id = c.conversation_id"]
+            if source is not None:
+                sub.append("conv.source = ?")
+                params.append(source)
+            if is_group is not None:
+                sub.append("conv.is_group = ?")
+                params.append(int(is_group))
+            clauses.append(
+                f"EXISTS (SELECT 1 FROM conversations conv WHERE {' AND '.join(sub)})"
+            )
+        if not clauses:
+            return None
+        rows = self.conn.execute(
+            f"SELECT c.chunk_id FROM chunks c WHERE {' AND '.join(clauses)}", tuple(params)
+        ).fetchall()
+        return {r["chunk_id"] for r in rows}
+
     def chunk_ids_for_faiss(self, faiss_ids: Sequence[int]) -> dict[int, str]:
         if not faiss_ids:
             return {}
