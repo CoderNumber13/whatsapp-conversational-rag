@@ -1,0 +1,52 @@
+# ---------------------------------------------------------------------------
+# PRIVACY: real conversation data must never be committed.
+# Synthetic sample data under data/sample/ IS tracked on purpose.
+# ---------------------------------------------------------------------------
+data/private/
+data/**/private/
+/data/*.txt          # loose exports dropped into data/ root
+
+# Reference PDFs / papers kept locally, not committed (may carry third-party PII)
+*.pdf
+
+# Databases / vector index / derived artifacts
+*.db
+*.sqlite
+*.sqlite3
+*.faiss
+*.pkl
+index/
+
+# Secrets
+.env
+.env.local
+.env.*.local
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ipynb_checkpoints/
+build/
+dist/
+
+# Environments
+.venv/
+venv/
+env/
+
+# Model / HF caches
+.cache/
+models/
+*.gguf
+
+# Logs
+logs/
+*.log
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

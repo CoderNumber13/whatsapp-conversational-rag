@@ -1,0 +1,11 @@
+[04/08/2026, 10:00:00] ‎Messages and calls are end-to-end encrypted. Tap to learn more.
+[04/08/2026, 10:00:03] ‎Sneha created group "DS Project Team"
+[04/08/2026, 10:00:05] ‎Sneha added Rahul Kumar
+[04/08/2026, 10:01:00] Sneha: Ok team, scope: a movie recommender with a small web UI
+[04/08/2026, 10:02:00] Rahul Kumar: I'll take the backend and the model. Me and Sneha can pair on data cleaning.
+[04/08/2026, 10:02:40] Me: I'll own the frontend and write the final report
+[04/08/2026, 10:03:00] Sneha: Decision: Rahul on backend, Me on frontend, Sneha on data + eval. Deadline 20 August.
+[12/08/2026, 18:00:00] Rahul Kumar: model is training. baseline accuracy 0.71
+[27/08/2026, 09:00:00] Sneha: Plan change: professor asked for a live demo instead of the report.
+[27/08/2026, 09:01:00] Me: Updated plan: drop the long report, keep a 2-page summary, focus on the demo
+[27/08/2026, 09:02:00] Rahul Kumar: agreed. new deadline for the demo is 31 August
