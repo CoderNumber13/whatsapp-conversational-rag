@@ -112,15 +112,20 @@ class RagPipeline:
         return self._llm
 
     def answer(
-        self, question: str, filters: Optional[RetrievalFilters] = None
+        self,
+        question: str,
+        filters: Optional[RetrievalFilters] = None,
+        *,
+        k: Optional[int] = None,
+        min_score: Optional[float] = None,
     ) -> Answer:
-        retrieved = self.retriever.retrieve(
-            question, k=self.config.retrieval_top_k, filters=filters
-        )
+        k = k or self.config.retrieval_top_k
+        floor = self.config.min_retrieval_score if min_score is None else min_score
+        retrieved = self.retriever.retrieve(question, k=k, filters=filters)
         top = retrieved[0].score if retrieved else 0.0
         logger.debug("retrieved %d chunks, top score %.3f", len(retrieved), top)
 
-        if not retrieved or top < self.config.min_retrieval_score:
+        if not retrieved or top < floor:
             return Answer(
                 text="I couldn't find anything about that in your chats.",
                 supported=False,
