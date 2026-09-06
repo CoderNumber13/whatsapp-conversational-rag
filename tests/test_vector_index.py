@@ -1,0 +1,137 @@
+"""FAISS store + EmbeddingIndexer + VectorSearch (mock embedder)."""
+
+from __future__ import annotations
+
+import numpy as np
+import pytest
+
+pytest.importorskip("faiss")
+
+from src.chunking.message_chunker import FixedCountChunker
+from src.chunking.service import ChunkingService
+from src.config import Config
+from src.embeddings.mock import MockEmbedder
+from src.ingestion.normalizer import WhatsAppExportSource
+from src.retrieval.indexer import EmbeddingIndexer
+from src.retrieval.vector_search import VectorSearch
+from src.retrieval.vector_store import FaissVectorStore
+from src.storage.database import Database
+from scripts.generate_synthetic_chats import write_all
+
+
+# --- store ------------------------------------------------------------
+
+def test_store_add_search_remove(tmp_path):
+    store = FaissVectorStore(dim=4, path=tmp_path, model_id="mock-4").load_or_create()
+    vecs = np.eye(4, dtype=np.float32)
+    store.add([10, 11, 12, 13], vecs)
+    hits = store.search(np.array([1, 0, 0, 0], dtype=np.float32), k=2)
+    assert hits[0][0] == 10 and hits[0][1] == pytest.approx(1.0, abs=1e-5)
+    store.remove([10])
+    assert 10 not in [i for i, _ in store.search(np.array([1, 0, 0, 0], dtype=np.float32), k=4)]
+    assert len(store) == 3
+
+
+def test_store_save_load_roundtrip(tmp_path):
+    s1 = FaissVectorStore(4, tmp_path, "mock-4").load_or_create()
+    s1.add([1, 2], np.eye(4, dtype=np.float32)[:2])
+    s1.save()
+    s2 = FaissVectorStore(4, tmp_path, "mock-4").load_or_create()
+    assert len(s2) == 2
+
+
+def test_store_model_mismatch_starts_fresh(tmp_path):
+    s1 = FaissVectorStore(4, tmp_path, "mock-4").load_or_create()
+    s1.add([1], np.eye(4, dtype=np.float32)[:1])
+    s1.save()
+    s2 = FaissVectorStore(4, tmp_path, "other-model").load_or_create()
+    assert len(s2) == 0
+
+
+# --- indexer + search ------------------------------------------------
+
+@pytest.fixture()
+def wired(tmp_path, monkeypatch):
+    monkeypatch.setenv("EMBEDDING_MODEL", "mock-64")
+    monkeypatch.setenv("INDEX_DIR", str(tmp_path / "idx"))
+    cfg = Config.reload()
+
+    files = write_all(tmp_path / "chats")
+    src = WhatsAppExportSource(files, me_names=["Me"])
+    src.ingest()
+    db = Database(tmp_path / "cm.db")
+    for c in src.get_conversations():
+        db.upsert_conversation(c, me_names=["Me"])
+    db.insert_messages(src.get_messages())
+    ChunkingService(db, FixedCountChunker(8, 2, 3)).sync_all()
+
+    indexer = EmbeddingIndexer(db, embedder=MockEmbedder(64), config=cfg)
+    yield db, cfg, indexer
+    db.close()
+
+
+def test_first_sync_embeds_all_chunks(wired):
+    db, cfg, indexer = wired
+    res = indexer.sync()
+    n = db.count_chunks()
+    assert res.embedded == n and res.reembedded == 0 and res.removed == 0
+    assert len(indexer.store) == n
+    assert len(db.embedding_meta_map()) == n
+
+
+def test_second_sync_is_noop(wired):
+    db, cfg, indexer = wired
+    indexer.sync()
+    res = indexer.sync()
+    assert res.changed_total == 0
+    assert res.unchanged == db.count_chunks()
+
+
+def test_edited_chunk_is_reembedded_with_stable_faiss_id(wired):
+    db, cfg, indexer = wired
+    indexer.sync()
+    meta_before = db.embedding_meta_map()
+    cid = max(db.conversation_ids(), key=lambda c: len(db.get_conversation_messages(c)))
+    victim = db.get_conversation_messages(cid)[9]
+    db.conn.execute(
+        "UPDATE messages SET text = text || ' (edited)' WHERE message_id = ?", (victim.message_id,)
+    )
+    db.commit()
+    ChunkingService(db, FixedCountChunker(8, 2, 3)).sync_conversation(cid)
+
+    res = indexer.sync()
+    assert res.reembedded >= 1 and res.embedded == 0 and res.removed == 0
+    assert len(indexer.store) == db.count_chunks()
+    # ids of surviving chunks are unchanged
+    meta_after = db.embedding_meta_map()
+    for k in meta_before.keys() & meta_after.keys():
+        assert meta_before[k][2] == meta_after[k][2]
+
+
+def test_rebuild_reproduces_index(wired):
+    db, cfg, indexer = wired
+    indexer.sync()
+    n = len(indexer.store)
+    res = indexer.rebuild()
+    assert res.embedded == db.count_chunks()
+    assert len(indexer.store) == n
+
+
+def test_vector_search_finds_relevant_chunk(wired):
+    db, cfg, indexer = wired
+    indexer.sync()
+    vs = VectorSearch(db, indexer.embedder, indexer.store)
+    # MockEmbedder isn't semantic, so query with text taken from a real chunk
+    target = db.all_chunks()[0]
+    hits = vs.search(target.text, k=3)
+    assert hits and hits[0].chunk.chunk_id == target.chunk_id
+    assert hits[0].score == pytest.approx(1.0, abs=1e-4)
+
+
+def test_vector_search_candidate_filter(wired):
+    db, cfg, indexer = wired
+    indexer.sync()
+    vs = VectorSearch(db, indexer.embedder, indexer.store)
+    allowed = {db.all_chunks()[1].chunk_id}
+    hits = vs.search(db.all_chunks()[0].text, k=5, candidate_chunk_ids=allowed)
+    assert {h.chunk.chunk_id for h in hits} <= allowed
