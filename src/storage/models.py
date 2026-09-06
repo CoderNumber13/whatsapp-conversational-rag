@@ -56,8 +56,14 @@ class Message:
     src_line_start: int = 0
     src_line_end: int = 0
 
+    # 0-based index among messages with an identical (conversation, timestamp,
+    # sender, text) in the same export. Keeps genuinely repeated short messages
+    # ("ok" / "ok") distinct — WhatsApp Android timestamps are minute-precision —
+    # while identical re-exports still produce identical ids (stable dedup key).
+    occurrence: int = 0
+
     message_id: str = ""
-    seq: int = -1  # order within the conversation, filled by the normalizer
+    seq: int = -1  # order within the conversation, a cache recomputed by the DB on ingest
 
     def __post_init__(self) -> None:
         if not self.sender_raw:
@@ -70,6 +76,7 @@ class Message:
                 self.timestamp.isoformat(),
                 self.sender_raw,
                 self.text,
+                self.occurrence,
             )
 
     @property
