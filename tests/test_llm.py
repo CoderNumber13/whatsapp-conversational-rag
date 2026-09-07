@@ -9,10 +9,27 @@ import pytest
 from src.config import Config
 from src.llm.base import LLMError
 from src.llm.factory import get_llm
+from src.llm.gemini_client import GeminiClient
 from src.llm.mock import MockLLM
 from src.llm.ollama_client import OllamaClient
 from src.llm.prompts import NOT_FOUND_TOKEN, build_user_prompt
 from src.storage.models import Message
+
+
+class _FakeResp:
+    def __init__(self, payload, status=200):
+        self._payload = payload
+        self.status_code = status
+        self.text = str(payload)
+
+    def json(self):
+        return self._payload
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            import requests
+
+            raise requests.exceptions.HTTPError(response=self)
 
 
 class _FakeRC:
@@ -74,6 +91,78 @@ def test_factory_unknown_provider_errors(monkeypatch):
     monkeypatch.setenv("LLM_PROVIDER", "banana")
     with pytest.raises(LLMError):
         get_llm(Config.reload())
+
+
+# --- gemini ---------------------------------------------------------
+
+def test_factory_gemini_builds_with_key(monkeypatch):
+    monkeypatch.setenv("LLM_PROVIDER", "gemini")
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    monkeypatch.setenv("GEMINI_MODEL", "gemini-2.5-flash")
+    client = get_llm(Config.reload())
+    assert isinstance(client, GeminiClient)
+    assert client.model == "gemini-2.5-flash"
+
+
+def test_factory_gemini_without_key_errors(monkeypatch):
+    monkeypatch.setenv("LLM_PROVIDER", "gemini")
+    monkeypatch.setenv("GEMINI_API_KEY", "")
+    with pytest.raises(LLMError):
+        get_llm(Config.reload())
+
+
+def test_gemini_parses_response_and_sends_key_in_header(monkeypatch):
+    captured = {}
+
+    def fake_post(url, json, headers, timeout):
+        captured["url"] = url
+        captured["headers"] = headers
+        captured["body"] = json
+        return _FakeResp(
+            {
+                "candidates": [{"content": {"parts": [{"text": "Rahul joins 2 Sept [m:abc]."}]},
+                                "finishReason": "STOP"}],
+                "usageMetadata": {"totalTokenCount": 42},
+            }
+        )
+
+    monkeypatch.setattr("src.llm.gemini_client.requests.post", fake_post)
+    out = GeminiClient(api_key="k", model="gemini-2.5-flash").complete("SYS", "USER")
+    assert out.text == "Rahul joins 2 Sept [m:abc]."
+    assert out.usage == {"totalTokenCount": 42}
+    assert captured["headers"]["x-goog-api-key"] == "k"
+    assert "gemini-2.5-flash:generateContent" in captured["url"]
+    assert captured["body"]["system_instruction"]["parts"][0]["text"] == "SYS"
+
+
+def test_gemini_blocked_prompt_raises(monkeypatch):
+    monkeypatch.setattr(
+        "src.llm.gemini_client.requests.post",
+        lambda *a, **k: _FakeResp({"promptFeedback": {"blockReason": "SAFETY"}}),
+    )
+    with pytest.raises(LLMError, match="blocked"):
+        GeminiClient(api_key="k").complete("s", "u")
+
+
+def test_gemini_empty_answer_raises(monkeypatch):
+    monkeypatch.setattr(
+        "src.llm.gemini_client.requests.post",
+        lambda *a, **k: _FakeResp({"candidates": [{"content": {"parts": []},
+                                                   "finishReason": "MAX_TOKENS"}]}),
+    )
+    with pytest.raises(LLMError, match="empty"):
+        GeminiClient(api_key="k").complete("s", "u")
+
+
+def test_gemini_connection_error_wrapped(monkeypatch):
+    import requests
+
+    def boom(*a, **k):
+        raise requests.exceptions.ConnectionError()
+
+    monkeypatch.setattr("src.llm.gemini_client.requests.post", boom)
+    with pytest.raises(LLMError, match="Cannot reach"):
+        GeminiClient(api_key="k").complete("s", "u")
 
 
 # --- prompt -----------------------------------------------------

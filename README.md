@@ -29,14 +29,17 @@ conda create -n convmem python=3.12 -y
 conda activate convmem
 pip install -r requirements.txt
 
-# 2. local LLM
-#    install Ollama for Windows, then:
-ollama pull llama3.1:8b
-#    Low RAM (Ollama "failed to allocate buffer"): set OLLAMA_NUM_CTX=2048 in
-#      .env, or use a small model: ollama pull llama3.2:3b  (OLLAMA_MODEL=llama3.2:3b)
-#    CUDA runner crash ("shared object initialization failed" / exit 0xc0000409,
-#      old NVIDIA driver vs Ollama's bundled CUDA): set OLLAMA_NUM_GPU=0 in .env
-#      to force CPU, or update the NVIDIA driver.
+# 2. pick an LLM (set in .env):
+#    a) Gemini (hosted, fastest to a good demo):
+#         LLM_PROVIDER=gemini
+#         GEMINI_API_KEY=<from https://aistudio.google.com/apikey>
+#    b) Local Ollama:
+#         install Ollama for Windows, then:  ollama pull llama3.1:8b
+#         Low RAM ("failed to allocate buffer"): OLLAMA_NUM_CTX=2048, or
+#           ollama pull llama3.2:3b (weaker; may over-abstain)
+#         CUDA crash (exit 0xc0000409, old NVIDIA driver): OLLAMA_NUM_GPU=0
+#           forces CPU, or update the NVIDIA driver
+#    c) OpenAI / any compatible endpoint: LLM_PROVIDER=openai + OPENAI_API_KEY
 
 # 3. config
 cp .env.example .env        # then edit ME_NAMES to your WhatsApp display name(s)
@@ -127,7 +130,7 @@ tests/                                 ← 127 tests
 ## Configuration
 
 All via environment / `.env` (see `.env.example`). Key knobs: `EMBEDDING_MODEL`
-(`mock` skips the download), `LLM_PROVIDER` (`ollama` | `openai` | `mock`),
-`OLLAMA_NUM_CTX`, `CHUNK_STRATEGY` (`fixed_count` | `time_window`),
+(`mock` skips the download), `LLM_PROVIDER` (`ollama` | `gemini` | `openai` |
+`mock`), `OLLAMA_NUM_CTX`, `CHUNK_STRATEGY` (`fixed_count` | `time_window`),
 `CHUNK_SIZE_MESSAGES` / `CHUNK_OVERLAP_MESSAGES`, `RETRIEVAL_TOP_K`,
 `MIN_RETRIEVAL_SCORE`, `CONTEXT_WINDOW_MESSAGES`.
