@@ -16,7 +16,8 @@ the pipeline works on a normalized, source-independent message schema.
 - Real chat data is **never** committed. `data/private/` and loose `.txt` drops
   are git-ignored; only the synthetic set under `data/sample/` is tracked.
 - No WhatsApp scraping, no account access — only user-exported `.txt` files.
-- LLM provider is configurable (`ollama` / `openai` / `mock`); no keys in source.
+- LLM provider is configurable (`gemini` / `ollama` / `openai` / `mock`); no keys
+  in source. Only `.env.example` (placeholders) is tracked — `.env` is ignored.
 - The FAISS index is derived data: it can always be rebuilt from SQLite.
 
 ## Setup
@@ -26,30 +27,48 @@ Requires **Python 3.12** (3.11 also fine). The installed 3.14 lacks ML wheels.
 ```bash
 # 1. environment
 conda create -n convmem python=3.12 -y
-conda activate convmem
+conda activate convmem          # REQUIRED: base Python 3.14 has no faiss/torch wheels
 pip install -r requirements.txt
 
-# 2. pick an LLM (set in .env):
-#    a) Gemini (hosted, fastest to a good demo):
-#         LLM_PROVIDER=gemini
-#         GEMINI_API_KEY=<from https://aistudio.google.com/apikey>
-#    b) Local Ollama:
-#         install Ollama for Windows, then:  ollama pull llama3.1:8b
-#         Low RAM ("failed to allocate buffer"): OLLAMA_NUM_CTX=2048, or
-#           ollama pull llama3.2:3b (weaker; may over-abstain)
-#         CUDA crash (exit 0xc0000409, old NVIDIA driver): OLLAMA_NUM_GPU=0
-#           forces CPU, or update the NVIDIA driver
-#    c) OpenAI / any compatible endpoint: LLM_PROVIDER=openai + OPENAI_API_KEY
-
-# 3. config
+# 2. config
 cp .env.example .env        # then edit ME_NAMES to your WhatsApp display name(s)
 
-# 4. tests  (uses a mock embedder + mock LLM — no model needed)
+# 3. tests  (uses a mock embedder + mock LLM — no model or API key needed)
 pytest
 
-# 5. run the app
+# 4. run the app
 streamlit run app.py
 ```
+
+> **Always activate `convmem` first.** The system Anaconda base is Python 3.14,
+> which has no `faiss` wheel — ingestion fails with `ModuleNotFoundError: faiss`.
+
+### Choosing an LLM
+
+Set `LLM_PROVIDER` in `.env`. **Default: `gemini`** — hosted, no local GPU/RAM
+requirement, and the fastest path to a working demo.
+
+| Provider | Config | Notes |
+|---|---|---|
+| `gemini` | `GEMINI_API_KEY` ([get one](https://aistudio.google.com/apikey)), `GEMINI_MODEL` | Default. Pin an explicit model, not `gemini-flash-latest` — a moving alias can change answers between runs. |
+| `ollama` | `OLLAMA_MODEL`, `OLLAMA_NUM_CTX` | Fully local/offline. See troubleshooting below. |
+| `openai` | `OPENAI_API_KEY`, `OPENAI_BASE_URL` | Also accepts OpenAI-compatible endpoints. |
+| `mock` | — | Deterministic; used by the test suite. |
+
+Gemini model names retire. If you see `404 ... no longer available to new
+users`, list what your key can actually reach and update `GEMINI_MODEL`:
+
+```bash
+python -c "import requests;from src.config import CONFIG;\
+print([m['name'] for m in requests.get(f'{CONFIG.gemini_base_url}/models',\
+headers={'x-goog-api-key':CONFIG.gemini_api_key}).json()['models']\
+if 'generateContent' in m.get('supportedGenerationMethods',[])])"
+```
+
+**Ollama troubleshooting** — `ollama pull llama3.1:8b` first. On
+`failed to allocate buffer`, set `OLLAMA_NUM_CTX=2048` or pull `llama3.2:3b`
+(weaker; may over-abstain). On a CUDA crash (exit `0xc0000409`, NVIDIA driver
+older than Ollama's bundled CUDA), set `OLLAMA_NUM_GPU=0` to force CPU.
 
 In the app: click **Load sample** (synthetic chats) or upload your own `.txt`
 exports, then ask questions. Every answer shows its **Sources** (the exact
@@ -87,12 +106,13 @@ src/
   chunking/    base.py · message_chunker.py · time_chunker.py · service.py
   embeddings/  base.py · sentence_transformer.py · mock.py · factory.py
   retrieval/   vector_store.py (FAISS) · indexer.py · vector_search.py · retriever.py
-  llm/         base.py · ollama_client.py · openai_client.py · mock.py · prompts.py
+  llm/         base.py · factory.py · gemini_client.py · ollama_client.py
+               openai_client.py · mock.py · prompts.py
   pipeline/    rag_pipeline.py
   graph/ query/ agent/ evaluation/     ← Phase 3+ (scaffolded)
 app.py                                 ← Streamlit UI
 scripts/generate_synthetic_chats.py
-tests/                                 ← 127 tests
+tests/                                 ← 136 tests
 ```
 
 ## Pipeline
