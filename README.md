@@ -10,6 +10,8 @@ the pipeline works on a normalized, source-independent message schema.
 > filters + context reconstruction) → grounded LLM answers with per-message
 > citations → Streamlit UI. Phase 2 (BM25 / hybrid / reranking) and Phase 3
 > (knowledge graph) are next.
+>
+> Full roadmap and component requirements: [`docs/PLAN.md`](docs/PLAN.md).
 
 ## Privacy
 
