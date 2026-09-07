@@ -12,11 +12,17 @@ text format changes, to force a global re-chunk + re-embed.
 
 from __future__ import annotations
 
+import re
 from typing import Protocol, Sequence
 
 from src.storage.models import Chunk, Message, stable_id
 
 CHUNKER_VERSION = "v1"
+
+# Bump when the embedding *input* recipe below changes: stored vectors were
+# built from the old recipe and must be regenerated. Tracked separately from
+# CHUNKER_VERSION because it does not change chunk ids or the stored text.
+EMBED_TEXT_VERSION = 2
 
 
 def make_chunk_id(
@@ -58,6 +64,26 @@ def render_chunk_text(conversation_name: str, is_group: bool, messages: Sequence
         f"Dates: {span_lo:%Y-%m-%d %H:%M} - {span_hi:%Y-%m-%d %H:%M}\n"
     )
     return header + "\n".join(render_message_line(m) for m in messages)
+
+
+_M_TAG_RE = re.compile(r"[ \t]*\[m:[0-9a-f]+\]")
+_LINE_TS_RE = re.compile(r"^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}\]\s*", re.M)
+
+
+def render_embedding_text(text: str) -> str:
+    """The retrieval view of a chunk: same content, without display scaffolding.
+
+    ``render_chunk_text`` is built for the LLM prompt and the citation parser, so
+    every line carries an ISO timestamp and an ``[m:<id>]`` tag. Those are ~60%
+    of the tokens and carry no meaning for similarity, and they push a 12-message
+    chunk well past all-MiniLM-L6-v2's 256-token input limit — where the tail is
+    silently discarded, sometimes taking the only mention of the subject with it.
+
+    Only the embedding input is affected. The stored ``chunk.text`` still goes to
+    the prompt verbatim, so citations are unchanged. Per-message timestamps
+    remain retrievable via metadata filters and the chunk's own date header.
+    """
+    return _LINE_TS_RE.sub("", _M_TAG_RE.sub("", text))
 
 
 def build_chunk(

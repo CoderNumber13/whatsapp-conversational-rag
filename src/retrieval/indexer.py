@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from src.chunking.base import EMBED_TEXT_VERSION, render_embedding_text
 from src.config import CONFIG, Config
 from src.embeddings.base import EmbeddingService
 from src.embeddings.factory import get_embedder
@@ -52,6 +53,15 @@ class EmbeddingIndexer:
             dim=self.embedder.dim, path=config.index_dir, model_id=self.embedder.model_id
         ).load_or_create()
 
+    @property
+    def embedding_key(self) -> str:
+        """Identity of the stored vectors: the model *and* the input recipe.
+
+        Recorded in ``embedding_meta.embedding_model`` so that changing either
+        one marks every existing vector stale and triggers a re-embed.
+        """
+        return f"{self.embedder.model_id}#et{EMBED_TEXT_VERSION}"
+
     def sync(self) -> IndexSyncResult:
         chunks = self.db.all_chunks()
         desired = {c.chunk_id: c for c in chunks}
@@ -67,7 +77,7 @@ class EmbeddingIndexer:
             for cid, c in desired.items()
             if cid not in meta
             or meta[cid][0] != c.content_hash
-            or meta[cid][1] != self.embedder.model_id
+            or meta[cid][1] != self.embedding_key
         ]
         res = IndexSyncResult(
             removed=len(removed), unchanged=len(desired) - len(stale)
@@ -75,7 +85,9 @@ class EmbeddingIndexer:
 
         next_fid = self.db.max_faiss_id() + 1
         for batch in _batched(stale, self.config.embedding_batch_size):
-            vectors = self.embedder.embed_texts([c.text for c in batch])
+            vectors = self.embedder.embed_texts(
+                [render_embedding_text(c.text) for c in batch]
+            )
             ids: list[int] = []
             reembed_ids: list[int] = []
             for c in batch:
@@ -92,7 +104,7 @@ class EmbeddingIndexer:
             self.store.add(ids, vectors)
             for c, fid in zip(batch, ids):
                 self.db.upsert_embedding_meta(
-                    c.chunk_id, c.content_hash, self.embedder.model_id,
+                    c.chunk_id, c.content_hash, self.embedding_key,
                     self.embedder.dim, fid, commit=False,
                 )
 

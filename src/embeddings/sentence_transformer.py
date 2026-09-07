@@ -7,9 +7,13 @@ actually needed.
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 
 from src.embeddings.base import EmbeddingService, l2_normalize
+
+logger = logging.getLogger(__name__)
 
 _DIM_HINT = {"sentence-transformers/all-MiniLM-L6-v2": 384}
 
@@ -39,9 +43,33 @@ class SentenceTransformerEmbedder(EmbeddingService):
             self.dim = self._model.get_sentence_embedding_dimension()
         return self._model
 
+    @property
+    def max_input_tokens(self) -> int:
+        return int(self.model.max_seq_length)
+
+    def count_tokens(self, text: str) -> int:
+        return len(self.model.tokenizer.encode(text))
+
+    def _warn_if_truncated(self, texts: list[str]) -> None:
+        """The model silently drops everything past ``max_seq_length``; say so.
+
+        A truncated chunk loses the tail of the conversation from its vector, so
+        it can become unretrievable by the very words it contains.
+        """
+        limit = self.max_input_tokens
+        over = [n for n in (self.count_tokens(t) for t in texts) if n > limit]
+        if over:
+            logger.warning(
+                "%d/%d texts exceed %s's %d-token input limit (largest %d) and "
+                "were truncated before embedding; content past the limit is not "
+                "searchable. Reduce CHUNK_SIZE_MESSAGES.",
+                len(over), len(texts), self.model_id, limit, max(over),
+            )
+
     def embed_texts(self, texts: list[str]) -> np.ndarray:
         if not texts:
             return np.zeros((0, self.dim or 384), dtype=np.float32)
+        self._warn_if_truncated(texts)
         vecs = self.model.encode(
             texts,
             batch_size=self.batch_size,
