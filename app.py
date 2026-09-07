@@ -46,6 +46,10 @@ def llm_status(cfg: Config) -> tuple[bool, str]:
             )
         except Exception:
             return False, f"ollama unreachable at {cfg.ollama_host}"
+    if cfg.llm_provider == "gemini":
+        return bool(cfg.gemini_api_key), (
+            f"gemini · {cfg.gemini_model}" if cfg.gemini_api_key else "GEMINI_API_KEY not set"
+        )
     if cfg.llm_provider == "openai":
         return bool(cfg.openai_api_key), (
             f"openai · {cfg.openai_model}" if cfg.openai_api_key else "OPENAI_API_KEY not set"

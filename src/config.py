@@ -81,6 +81,13 @@ class Config:
         default_factory=lambda: _get("OPENAI_BASE_URL", "https://api.openai.com/v1")
     )
     openai_model: str = field(default_factory=lambda: _get("OPENAI_MODEL", "gpt-4o-mini"))
+    gemini_api_key: str = field(default_factory=lambda: _get("GEMINI_API_KEY", ""))
+    gemini_model: str = field(default_factory=lambda: _get("GEMINI_MODEL", "gemini-2.5-flash"))
+    gemini_base_url: str = field(
+        default_factory=lambda: _get(
+            "GEMINI_BASE_URL", "https://generativelanguage.googleapis.com/v1beta"
+        )
+    )
 
     embedding_batch_size: int = field(
         default_factory=lambda: _get_int("EMBEDDING_BATCH_SIZE", 64)

@@ -172,9 +172,11 @@ class RagPipeline:
         prompt is expected to fit the model's context (minus the answer budget)."""
         chunks = retrieved[: max(1, self.config.max_context_chunks)]
 
-        budget_tokens = 4096
-        if self.config.llm_provider == "ollama":
-            budget_tokens = self.config.ollama_num_ctx
+        # Local models have a tight context window; hosted models (openai/gemini)
+        # have huge ones, so there MAX_CONTEXT_CHUNKS is the real cap.
+        budget_tokens = (
+            self.config.ollama_num_ctx if self.config.llm_provider == "ollama" else 32000
+        )
         headroom = budget_tokens - self.config.llm_max_tokens - 256  # sys prompt + slack
         headroom = max(headroom, 512)
 

@@ -32,4 +32,15 @@ def get_llm(config: Config = CONFIG) -> LLMClient:
             max_tokens=config.llm_max_tokens,
             timeout_s=config.llm_timeout_s,
         )
+    if provider == "gemini":
+        from src.llm.gemini_client import GeminiClient
+
+        return GeminiClient(
+            api_key=config.gemini_api_key,
+            model=config.gemini_model,
+            base_url=config.gemini_base_url,
+            temperature=config.llm_temperature,
+            max_tokens=config.llm_max_tokens,
+            timeout_s=config.llm_timeout_s,
+        )
     raise LLMError(f"unknown LLM_PROVIDER: {config.llm_provider!r}")
