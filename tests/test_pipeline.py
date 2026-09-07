@@ -6,6 +6,7 @@ import pytest
 
 pytest.importorskip("faiss")
 
+from src.chunking.base import render_embedding_text
 from src.config import Config
 from src.llm.base import LLMResponse
 from src.pipeline.rag_pipeline import RagPipeline
@@ -57,14 +58,34 @@ def _pipeline_over(tmp_path, monkeypatch, export_text, *, me="You", **env):
     return pipe
 
 
-# --- regression: "gmail password" query when the data has no password -----
-# Original report: asking for the password of a Gmail account returned
-# "no record found". Trace showed every stage worked: retrieval surfaced the
-# gmail conversation and it was in the LLM prompt, but the chat only contains
-# "make a new gmail" + the address — no password exists anywhere in the data.
-# The system correctly refused to invent one. This test locks that in.
+# --- regression: the "gmail password" not-found report --------------------
+# Reported twice. The first investigation searched the corpus for the keywords
+# password/pwd/login/otp, found none, and concluded no password existed — so it
+# recorded the refusal as correct behaviour. That conclusion was WRONG: the
+# credential was there all along as a bare, unlabelled token sent one minute
+# before the address. A keyword scan cannot see it, because nothing in the chat
+# says the word "password".
+#
+# The real defect is that an unlabelled high-entropy token carries almost no
+# semantic signal, so cosine similarity against the word "password" cannot reach
+# it. Vector-only retrieval structurally cannot answer this; it needs the exact/
+# keyword half of hybrid retrieval (Phase 2). See the xfail below.
+#
+# All values here are SYNTHETIC. Never put a real credential in a fixture — the
+# earlier version of this file committed one to git history.
 
-_GMAIL_EXPORT = """\
+_NO_CREDENTIAL_EXPORT = """\
+21/08/2026, 13:34 - Karan: synthetic sample message
+21/08/2026, 13:34 - You: synthetic sample message
+21/08/2026, 13:40 - You: synthetic sample message
+21/08/2026, 14:30 - You: testuser.sample@example.com
+21/08/2026, 16:47 - Karan: synthetic sample message
+21/08/2026, 17:41 - You: synthetic sample message
+"""
+
+# Same conversation, but with an unlabelled credential token at 14:29 — the
+# shape of the real export. "@sample7handle" stands in for the real value.
+_UNLABELLED_CREDENTIAL_EXPORT = """\
 21/08/2026, 13:34 - Karan: synthetic sample message
 21/08/2026, 13:34 - You: synthetic sample message
 21/08/2026, 13:40 - You: synthetic sample message
@@ -76,20 +97,16 @@ _GMAIL_EXPORT = """\
 
 
 def test_gmail_password_query_does_not_fabricate_when_absent(tmp_path, monkeypatch):
-    pipe = _pipeline_over(tmp_path, monkeypatch, _GMAIL_EXPORT)
+    """With no credential in the corpus at all, the system must refuse rather
+    than promote a nearby token into an answer."""
+    pipe = _pipeline_over(tmp_path, monkeypatch, _NO_CREDENTIAL_EXPORT)
 
-    # the corpus genuinely contains no password (root cause of the report)
-    assert pipe.db.get_messages(contains="password") == []
-    assert pipe.db.get_messages(contains="pwd") == []
-
-    # retrieval is NOT the failing stage: the gmail conversation is retrievable
     hits = pipe.retriever.retrieve(
         "password of the new gmail account I created for Karan", k=5
     )
     assert hits, "retrieval returned nothing at all"
     assert any("gmail" in h.chunk.text.lower() for h in hits), "gmail chunk not retrieved"
 
-    # a grounded LLM sees the gmail messages but no password -> NOT_FOUND.
     pipe._llm = _StubLLM("NOT_FOUND")
     ans = pipe.answer(
         "What is the password of the new Gmail account I created for Karan?"
@@ -103,11 +120,52 @@ def test_gmail_password_query_does_not_fabricate_when_absent(tmp_path, monkeypat
 def test_gmail_password_query_drops_hallucinated_password(tmp_path, monkeypatch):
     """If a future model *invents* a password with a made-up citation, the
     citation validator must drop it and the answer must not count as supported."""
-    pipe = _pipeline_over(tmp_path, monkeypatch, _GMAIL_EXPORT)
+    pipe = _pipeline_over(tmp_path, monkeypatch, _NO_CREDENTIAL_EXPORT)
     pipe._llm = _StubLLM("The password is Hunter2! [m:deadbeefdeadbeef].")
     ans = pipe.answer("What is the Gmail password?")
     assert ans.citations == []
     assert ans.supported is False
+
+
+def test_unlabelled_credential_is_stored_and_reachable_by_exact_text(
+    tmp_path, monkeypatch
+):
+    """The credential IS in the corpus — the first investigation's premise that
+    it was absent is false. Structured lookup finds it; only the semantic query
+    cannot. This is what makes the xfail below a retrieval gap, not missing data.
+    """
+    pipe = _pipeline_over(tmp_path, monkeypatch, _UNLABELLED_CREDENTIAL_EXPORT)
+
+    # present in the DB, and adjacent to the gmail discussion
+    assert pipe.db.get_messages(contains="@sample7handle"), "credential not stored"
+    # but invisible to every word a user would search for
+    for word in ("password", "pwd", "login", "credential"):
+        assert pipe.db.get_messages(contains=word) == [], (
+            f"unexpected {word!r} match — fixture no longer models the real export"
+        )
+
+
+def test_unlabelled_credential_has_no_lexical_overlap_with_the_query(
+    tmp_path, monkeypatch
+):
+    """Why vector-only retrieval cannot close this: the stored credential shares
+    no word with any phrasing a user would search by.
+
+    Deliberately *not* an xfail on ``retrieve()``. The suite runs on MockEmbedder
+    over tiny fixtures, where top-k returns everything and the query would
+    'succeed' for reasons unrelated to semantics — a green test that proves
+    nothing. The real measurement lives in docs/PLAN.md's Phase 2 criteria.
+    """
+    pipe = _pipeline_over(tmp_path, monkeypatch, _UNLABELLED_CREDENTIAL_EXPORT)
+    msgs = pipe.db.get_messages(contains="@sample7handle")
+    assert msgs, "credential not stored"
+
+    stored = {w.strip("@.,:").lower() for w in msgs[0]["text"].split()}
+    query_words = {"what", "is", "my", "gmail", "password"}
+    assert not (stored & query_words), (
+        "fixture no longer models the failure: the credential must share no "
+        "term with the query, which is exactly what defeats cosine similarity"
+    )
 
 
 # --- ingest --------------------------------------------------------
@@ -161,7 +219,9 @@ def test_reingest_is_idempotent(tmp_path, monkeypatch):
 def test_answer_on_exact_chunk_text_is_grounded(tmp_path, monkeypatch):
     pipe, cfg, _, _ = _build(tmp_path, monkeypatch, MIN_RETRIEVAL_SCORE="-1")
     target = pipe.db.all_chunks()[0]
-    ans = pipe.answer(target.text)  # mock embedder -> exact match scores ~1.0
+    # chunks are embedded from their embedding view, so that is what an exact
+    # match must be queried with (mock embedder -> score ~1.0)
+    ans = pipe.answer(render_embedding_text(target.text))
     assert ans.abstained is False
     assert ans.supported is True
     assert ans.citations

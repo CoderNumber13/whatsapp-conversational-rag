@@ -58,6 +58,28 @@ without exposing anyone's private conversations.
 Hybrid retrieval matters because vector search alone is weak on names, exact
 dates, project names, company names, and specific phrases.
 
+**Measured evidence (2026-09-07 investigation).** On the real 141-message
+corpus, asking for a credential that *is* present returned "not found". Two
+distinct causes, one fixed and one deferred:
+
+1. *Fixed.* Chunks were embedded from their display text, so `[m:<id>]` tags and
+   per-line ISO timestamps made up ~60% of every vector's input and pushed 13 of
+   15 chunks past all-MiniLM-L6-v2's 256-token limit. One gmail chunk had the
+   word "gmail" truncated away entirely. Embedding the stripped view raised the
+   target chunk 0.1806 → 0.2391 and cut truncation to 1 of 15.
+2. *Deferred to Phase 2.* The credential is an unlabelled bare token — nothing
+   in the chat says "password". It shares no term with any natural phrasing of
+   the question, so cosine similarity cannot reach it at any threshold. **This
+   is the acceptance test for hybrid retrieval:** on the real corpus, "what is
+   my gmail password" must surface the chunk holding that token.
+
+Also measured: `MIN_RETRIEVAL_SCORE=0.25` is not a valid relevance gate here. An
+irrelevant query ("trip to Japan") scored **0.3307** while two answerable gmail
+questions scored **0.2253** and **0.2391** — the floor abstains on real matches
+and admits irrelevant ones. Lowering it to 0.10 made the LLM assert a password
+by inferring one from an adjacent token. Leave the floor alone until hybrid
+retrieval + reranking give scores worth thresholding on.
+
 Reranking is a distinct modular stage so approaches can be swapped:
 `query → vector + keyword retrieval → candidate pool → reranker → top chunks`.
 
