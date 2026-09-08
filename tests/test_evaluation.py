@@ -23,6 +23,7 @@ from src.evaluation.dataset import (
 from src.evaluation.corpus import CREDENTIAL_TOKEN, generate_large_corpus
 from src.evaluation.metrics import QuestionResult, summarize, threshold_analysis
 from src.evaluation.runner import SAMPLE_DIR, run_eval
+from src.evaluation.sweep import max_rank_that_can_win, single_can_outrank_double
 
 
 def _r(qid, rank, *, absent=False, top=0.5, correct=None, irrel=None, ms=1.0):
@@ -204,3 +205,53 @@ def test_large_scale_benchmark_runs_end_to_end():
     assert len(run.results) == len(QUESTIONS)
     assert run.corpus["scale"] == "large"
     assert run.corpus["chunks"] > 100, "not deep enough for k=10 to be meaningful"
+
+
+# --- RRF sweep: the agreement-dominance condition ---------------------
+# A one-retriever chunk at rank r scores 1/(K+r); a two-retriever chunk at the
+# very bottom of both lists scores 2/(K+D). The former can win only when
+#     1/(K+r) > 2/(K+D)   <=>   r < (D-K)/2
+# Setting r=1 gives the regime boundary D > K+2.
+
+@pytest.mark.parametrize("k_rrf,depth,expected", [
+    (60, 50, False),   # production default: agreement dominates absolutely
+    (60, 100, True),
+    (5, 10, True),
+    (10, 10, False),
+    (10, 12, False),   # boundary: D == K+2 -> still dominated
+    (10, 13, True),    # D == K+3 -> a rank-1 single-retriever chunk can win
+])
+def test_single_can_outrank_double_matches_the_derived_boundary(k_rrf, depth, expected):
+    assert single_can_outrank_double(k_rrf, depth) is expected
+
+
+@pytest.mark.parametrize("k_rrf,depth,expected", [
+    (5, 50, 22),    # (50-5)/2 = 22.5 -> r <= 22
+    (10, 50, 19),   # (50-10)/2 = 20.0 -> r < 20 -> r <= 19
+    (30, 50, 9),    # (50-30)/2 = 10.0 -> r <= 9
+    (60, 50, 0),    # negative bound -> no rank suffices
+    (120, 144, 11),
+    (5, 10, 2),
+])
+def test_max_rank_that_can_win(k_rrf, depth, expected):
+    assert max_rank_that_can_win(k_rrf, depth) == expected
+
+
+def test_the_boundary_functions_agree_with_each_other():
+    for k_rrf in range(0, 80, 7):
+        for depth in range(1, 150, 11):
+            can = single_can_outrank_double(k_rrf, depth)
+            assert can == (max_rank_that_can_win(k_rrf, depth) >= 1)
+
+
+@pytest.mark.parametrize("k_rrf,depth", [(5, 50), (10, 50), (60, 50), (60, 144)])
+def test_derived_boundary_matches_the_actual_rrf_arithmetic(k_rrf, depth):
+    """The closed form must agree with the formula it was derived from."""
+    best_single = 1.0 / (k_rrf + 1)
+    worst_double = 2.0 / (k_rrf + depth)
+    assert single_can_outrank_double(k_rrf, depth) == (best_single > worst_double)
+
+    r = max_rank_that_can_win(k_rrf, depth)
+    if r >= 1:
+        assert 1.0 / (k_rrf + r) > worst_double
+        assert 1.0 / (k_rrf + r + 1) <= worst_double

@@ -33,6 +33,43 @@ class EvalRun:
     corpus: dict
 
 
+def evaluate_questions(
+    retriever, questions: Sequence[EvalQuestion], expected: dict[str, set[str]], k: int
+) -> list[QuestionResult]:
+    """Score one retriever over the benchmark.
+
+    Shared by ``run_eval`` and the RRF sweep so both measure identically — a
+    parameter sweep that scored differently from the baseline would not be
+    comparable with it.
+    """
+    results: list[QuestionResult] = []
+    for q in questions:
+        want = expected[q.qid]
+        t0 = time.perf_counter()
+        hits = retriever.retrieve(q.question, k=k)
+        latency_ms = (time.perf_counter() - t0) * 1000.0
+
+        first_rank: Optional[int] = None
+        correct_score: Optional[float] = None
+        top_irrelevant: Optional[float] = None
+        for i, h in enumerate(hits, start=1):
+            relevant = bool(want & set(h.chunk.message_ids))
+            if relevant and first_rank is None:
+                first_rank, correct_score = i, h.score
+            if not relevant and top_irrelevant is None:
+                top_irrelevant = h.score
+
+        results.append(QuestionResult(
+            qid=q.qid, category=q.category, question=q.question,
+            is_absent=q.is_absent, n_expected=len(want),
+            first_relevant_rank=first_rank, correct_score=correct_score,
+            top_irrelevant_score=top_irrelevant,
+            top_score=(hits[0].score if hits else 0.0),
+            latency_ms=latency_ms, n_retrieved=len(hits),
+        ))
+    return results
+
+
 def run_eval(
     questions: Sequence[EvalQuestion] = tuple(QUESTIONS),
     *,
@@ -106,31 +143,7 @@ def run_eval(
             # warm up so the first question doesn't absorb model/index load
             pipe.retriever.retrieve("warmup", k=1)
 
-            results: list[QuestionResult] = []
-            for q in questions:
-                want = expected[q.qid]
-                t0 = time.perf_counter()
-                hits = pipe.retriever.retrieve(q.question, k=k)
-                latency_ms = (time.perf_counter() - t0) * 1000.0
-
-                first_rank: Optional[int] = None
-                correct_score: Optional[float] = None
-                top_irrelevant: Optional[float] = None
-                for i, h in enumerate(hits, start=1):
-                    relevant = bool(want & set(h.chunk.message_ids))
-                    if relevant and first_rank is None:
-                        first_rank, correct_score = i, h.score
-                    if not relevant and top_irrelevant is None:
-                        top_irrelevant = h.score
-
-                results.append(QuestionResult(
-                    qid=q.qid, category=q.category, question=q.question,
-                    is_absent=q.is_absent, n_expected=len(want),
-                    first_relevant_rank=first_rank, correct_score=correct_score,
-                    top_irrelevant_score=top_irrelevant,
-                    top_score=(hits[0].score if hits else 0.0),
-                    latency_ms=latency_ms, n_retrieved=len(hits),
-                ))
+            results = evaluate_questions(pipe.retriever, questions, expected, k)
 
             corpus = {
                 "scale": scale,
