@@ -40,11 +40,19 @@ def run_eval(
     embedding_model: Optional[str] = None,
     workdir: Optional[Path] = None,
     scale: str = "sample",
+    retriever: str = "vector",
 ) -> EvalRun:
     """`scale="sample"` is the 7-chunk tracked corpus; `scale="large"` adds
-    production-scale filler and distractors around the same gold answers."""
+    production-scale filler and distractors around the same gold answers.
+
+    `retriever` selects the searcher behind the identical retrieval path:
+    "vector" (FAISS, the baseline) or "bm25" (lexical). Both satisfy
+    ChunkSearcher, so nothing else in the pipeline changes.
+    """
     if scale not in ("sample", "large"):
         raise ValueError(f"unknown scale {scale!r} (want 'sample' or 'large')")
+    if retriever not in ("vector", "bm25"):
+        raise ValueError(f"unknown retriever {retriever!r} (want 'vector' or 'bm25')")
     tmp = Path(workdir) if workdir else Path(tempfile.mkdtemp(prefix="convmem-eval-"))
     owned = workdir is None
     try:
@@ -79,7 +87,15 @@ def run_eval(
             ]
             expected = resolve_expectations(questions, messages)
 
-            # warm the embedder so the first question doesn't absorb model load
+            if retriever == "bm25":
+                from src.retrieval.keyword_search import BM25Search
+                from src.retrieval.retriever import Retriever
+
+                # same Retriever, same filters, same context expansion — only
+                # the searcher differs, so the comparison isolates ranking
+                pipe._retriever = Retriever(pipe.db, BM25Search.open(pipe.db, cfg), cfg)
+
+            # warm up so the first question doesn't absorb model/index load
             pipe.retriever.retrieve("warmup", k=1)
 
             results: list[QuestionResult] = []
@@ -110,6 +126,7 @@ def run_eval(
 
             corpus = {
                 "scale": scale,
+                "retriever": retriever,
                 "messages": len(messages),
                 "conversations": len(pipe.db.conversation_ids()),
                 "chunks": pipe.db.count_chunks(),

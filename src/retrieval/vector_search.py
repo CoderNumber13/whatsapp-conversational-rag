@@ -7,21 +7,17 @@ when filtering we over-fetch from FAISS and trim afterwards.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Optional
 
 from src.config import CONFIG, Config
 from src.embeddings.base import EmbeddingService
 from src.embeddings.factory import get_embedder
 from src.storage.database import Database
-from src.storage.models import Chunk
+from src.retrieval.base import ScoredChunk
 from src.retrieval.vector_store import FaissVectorStore
 
-
-@dataclass
-class ScoredChunk:
-    chunk: Chunk
-    score: float
+__all__ = ["ScoredChunk", "VectorSearch"]  # ScoredChunk re-exported: it moved to
+# src.retrieval.base so BM25 can share it; existing imports keep working.
 
 
 class VectorSearch:
