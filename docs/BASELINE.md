@@ -325,6 +325,119 @@ irrelevant — they are fusion artifacts, not confidence. `MIN_RETRIEVAL_SCORE`
 (0.25, untouched) would abstain on every query under RRF. Any gate on a fused
 retriever needs a calibrated score, which fusion does not provide.
 
+## Experiment 3 — RRF parameter sensitivity (K × candidate depth)
+
+Measured **2026-09-09**, `large` scale, same 44 questions.
+`python scripts/rrf_sweep.py`
+
+Controlled by construction: the corpus is ingested once and the vector and BM25
+searchers are built once, so every configuration fuses *identical* component
+rankings. Only K and depth vary. **The production default is unchanged
+(K=60, D=50).**
+
+### When can a one-retriever chunk outrank a two-retriever chunk?
+
+A chunk found by one retriever at rank `r` scores `1/(K+r)`. A chunk found by
+both at ranks `a,b` scores `1/(K+a) + 1/(K+b)`; its weakest possible case is
+`a=b=D`, scoring `2/(K+D)`. So the single-retriever chunk can win only when
+
+```
+1/(K + r) > 2/(K + D)   ⟺   K + D > 2K + 2r   ⟺   r < (D − K)/2      (1)
+```
+
+Setting r = 1 gives the regime boundary **D > K + 2**: unless depth exceeds K by
+more than 2, *no* single-retriever chunk can ever outrank a doubly-retrieved
+one, at any rank. Largest rank that can still win, by (1):
+
+| D \ K | 5 | 10 | 20 | 30 | 60 | 120 |
+|---|---|---|---|---|---|---|
+| 10 | r≤2 | NEVER | NEVER | NEVER | NEVER | NEVER |
+| 20 | r≤7 | r≤4 | NEVER | NEVER | NEVER | NEVER |
+| 50 | r≤22 | r≤19 | r≤14 | r≤9 | **NEVER** | NEVER |
+| 100 | r≤47 | r≤44 | r≤39 | r≤34 | r≤19 | NEVER |
+| 144 | r≤69 | r≤66 | r≤61 | r≤56 | r≤41 | r≤11 |
+
+The production default (K=60, D=50) sits in the NEVER region — confirmed
+empirically: at that setting X1 beats **0** of the doubly-retrieved chunks.
+
+**(1) bounds possibility, not outcome.** Beating the *worst* doubly-retrieved
+chunk is not the same as beating well-ranked ones. At K=5/D=50 condition (1)
+permits X1 (vector rank 6) to win, yet it still lands at rank 16 — because 13
+chunks are ranked well by *both* retrievers.
+
+### The sweep
+
+| D | K | R@1 | R@3 | R@5 | R@10 | MRR | exact | cred R@10 | X1 | P5 | E1 | E6 | ms |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 10 | 5–120 | 63.2% | 92.1% | 92.1% | **97.4%** | 0.779 | 28.6% | **66.7%** | **9** | 3 | 2 | 2 | **17.1** |
+| 20 | 5–120 | **65.8%** | **92.1%** | 92.1% | 94.7% | **0.784** | 42.9% | 33.3% | – | 3 | 2 | 1 | 18.5 |
+| 50 | 5 | **65.8%** | **92.1%** | 92.1% | 94.7% | **0.784** | 42.9% | 33.3% | – | 3 | 2 | 1 | 21.2 |
+| 50 | 10 | 65.8% | 89.5% | 92.1% | 94.7% | 0.782 | 42.9% | 33.3% | – | 4 | 2 | 1 | 21.1 |
+| **50** | **60** | 65.8% | 89.5% | 92.1% | 92.1% | 0.779 | 42.9% | **0.0%** | – | 4 | 2 | 1 | 21.2 |
+| 100 | 5 | 65.8% | 92.1% | 92.1% | 94.7% | 0.784 | 42.9% | 33.3% | – | 3 | 2 | 1 | 25.2 |
+| 144 | 120 | 65.8% | 89.5% | 92.1% | 92.1% | 0.777 | 42.9% | 0.0% | – | 5 | 2 | 1 | 29.0 |
+
+(bold row = current production default. Full 30-configuration grid in the
+script output.)
+
+### Findings
+
+**1. K is almost inert; depth is the live parameter.** Across K ∈ {5…120} at
+fixed depth, Recall@1 is *identical* and MRR moves by ≤0.005. Per-category
+Recall@1 is byte-identical across every K at every depth. K's only visible
+effect is on Recall@3/@10 at D≥50, where K=5 keeps 92.1%/94.7% versus
+89.5%/92.1% at K≥20.
+
+**2. Depth drives everything, through the size of the agreed set.** Depth
+controls how many chunks *both* retrievers return, and those are what a
+single-retriever chunk must outrank. For X1:
+
+| D | chunks in both lists | X1's fused rank |
+|---|---|---|
+| 10 | 3 | **9** |
+| 20 | 11 | 13–15 |
+| 50 | 20 | 16–23 |
+| 144 | 27 | 18–28 |
+
+**3. Shallow depth partially recovers the credential case.** At D=10, X1 reaches
+rank 9 and credential Recall@10 is 66.7% — the best in the grid. But no
+configuration reaches vector-alone's credential Recall@10 of **100%**, and
+**credential Recall@1 is 0.0% in all 30 configurations.** Parameter tuning does
+not fix this failure.
+
+**4. exact_term needs depth ≥ 20.** D=10 drops it to 28.6% (from 42.9%), because
+BM25's evidence is truncated before fusion.
+
+**5. paraphrase is completely insensitive** — 87.5% in every configuration.
+
+### Trade-offs
+
+| Axis | Best | Cost elsewhere |
+|---|---|---|
+| Overall quality | D=20 or D=50/K=5 (MRR 0.784) | none measured |
+| Recall@10 | D=10 (97.4%) | exact_term −14.3 |
+| exact_term | D≥20 (42.9%) | credential R@10 −33.3 |
+| credential | D=10 (R@10 66.7%) | exact_term 28.6%; still R@1 0% |
+| paraphrase | insensitive | — |
+| Stability | K irrelevant; depth decisive | — |
+| Latency | D=10 (17.1 ms) | scales ~linearly: D=144 → 29.0 ms |
+
+**No configuration is best on every axis.** exact_term and credential pull in
+opposite directions on depth: exact_term wants ≥20, credential wants 10.
+
+### Not a recommendation to change the default
+
+The evidence does say the current default is *dominated*: **D=20 (any K)** and
+**D=50/K=5** each match it on Recall@1 and exact_term while beating it on
+Recall@3 (+2.6), Recall@10 (+2.6), MRR (+0.005) and credential Recall@10
+(+33.3); D=20 is also 2.7 ms faster. That is a consistent, if small, improvement
+on a 38-question sample where one question is 2.6 points — well within noise for
+a single corpus.
+
+Changing the default should be a deliberate decision made on more than this one
+synthetic corpus, and none of these configurations addresses the credential
+failure, which remains 0% Recall@1 everywhere.
+
 ## What this baseline is for
 
 Any Phase 2 change (BM25, hybrid, reranking, semantic chunking) must be measured
