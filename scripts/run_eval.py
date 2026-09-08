@@ -33,7 +33,7 @@ def main() -> int:
                     help="override EMBEDDING_MODEL (e.g. mock-64 for a fast smoke run)")
     ap.add_argument("--scale", choices=("sample", "large"), default="sample",
                     help="sample = tracked 7-chunk corpus; large = production scale")
-    ap.add_argument("--retriever", choices=("vector", "bm25"), default="vector")
+    ap.add_argument("--retriever", choices=("vector", "bm25", "rrf"), default="vector")
     ap.add_argument("--json", type=Path, default=None)
     args = ap.parse_args()
 
@@ -42,7 +42,9 @@ def main() -> int:
     s, c = run.summary, run.corpus
 
     print("=" * 78)
-    print(f"RETRIEVAL EVAL — {c['retriever'].upper()} (no hybrid, no rerank)")
+    _LABEL = {"vector": "VECTOR only (the baseline)", "bm25": "BM25 lexical only",
+              "rrf": "RRF hybrid (vector + BM25, rank fusion)"}
+    print(f"RETRIEVAL EVAL — {_LABEL[c['retriever']]} — no reranking")
     print("=" * 78)
     print(f"corpus     : {c['scale']} scale - {c['messages']} messages / "
           f"{c['conversations']} conversations / {c['chunks']} chunks")

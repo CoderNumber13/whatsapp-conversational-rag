@@ -27,6 +27,10 @@ from src.storage.models import Chunk
 class ScoredChunk:
     chunk: Chunk
     score: float
+    # How this result was arrived at. Single-searcher results leave it None; a
+    # fusion fills in {searcher_name: rank} so a result can always be traced
+    # back to the retrievers that produced it and the rank each gave it.
+    provenance: Optional[dict[str, int]] = None
 
 
 @runtime_checkable

@@ -222,20 +222,32 @@ def test_rare_acronym_is_highly_selective(searcher):
     assert len(bm25.search("CGPA", k=100)) <= 2
 
 
-def test_a_term_in_half_the_corpus_scores_zero_and_returns_nothing(searcher):
+def test_a_term_in_exactly_half_the_corpus_scores_zero_and_returns_nothing(tmp_path):
     """Documented BM25Okapi behaviour, not a bug: its IDF is
     log(N-n+0.5) - log(n+0.5), which is exactly 0 when a term appears in half
-    the documents and negative beyond that. Such a term carries no discriminating
-    evidence, so returning nothing beats returning the whole corpus unordered.
+    the documents. Such a term carries no discriminating evidence, so returning
+    nothing beats returning the whole corpus unordered.
 
     Pinned because it explains part of BM25's weakness on common-word queries.
+    Uses a hand-built corpus rather than the sample one: which real terms land
+    on exactly half is incidental, and picking one from a set made the test
+    depend on hash ordering.
     """
-    bm25, _ = searcher
-    n = len(bm25)
-    common = [t for t in {tok for toks in bm25._tokens for tok in toks}
-              if sum(t in toks for toks in bm25._tokens) >= n / 2]
-    assert common, "corpus has no term frequent enough to exercise this"
-    assert bm25.search(common[0], k=10) == []
+    db = Database(tmp_path / "half.db")
+    bm25 = BM25Search(
+        db,
+        ["c1", "c2", "c3", "c4"],
+        [["shared", "alpha"], ["shared", "beta"],  # "shared" in exactly 2 of 4
+         ["gamma"], ["delta"]],
+    )
+    # in exactly half the corpus -> IDF 0 -> no chunk scores above zero
+    assert list(bm25._bm25.get_scores(["shared"])) == [0.0, 0.0, 0.0, 0.0]
+    assert bm25.search("shared", k=10) == []
+
+    # in one document of four -> discriminating, scores above zero
+    gamma = list(bm25._bm25.get_scores(["gamma"]))
+    assert gamma[2] > 0 and sum(g > 0 for g in gamma) == 1
+    db.close()
 
 
 # --- documented limitation --------------------------------------------
