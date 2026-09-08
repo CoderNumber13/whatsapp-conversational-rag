@@ -245,6 +245,86 @@ BM25 does exactly what the baseline predicted it would — it fixes `exact_term`
 superior: it wins where dense retrieval fails and fails where dense retrieval
 wins. It does **not** fix the credential failure that started this work.
 
+## Experiment 2 — RRF hybrid (vector + BM25), rank fusion
+
+Measured **2026-09-09**, `large` scale, identical 44 questions, `RRF_K=60`,
+`RRF_CANDIDATES=50`.
+`python scripts/run_eval.py --scale large --retriever rrf`
+
+| Metric | Vector | BM25 | **RRF** |
+|---|---|---|---|
+| Recall@1 | 57.9% | **65.8%** | **65.8%** |
+| Recall@3 | 73.7% | 81.6% | **89.5%** |
+| Recall@5 | 76.3% | 86.8% | **92.1%** |
+| Recall@10 | 92.1% | 89.5% | **92.1%** |
+| MRR | 0.682 | 0.749 | **0.779** |
+| Latency (mean) | 15.9 ms | **2.9 ms** | 21.0 ms |
+| Separation | +0.0566 | +2.4848 | +0.0035 |
+
+| Category R@1 | Vector | BM25 | RRF |
+|---|---|---|---|
+| direct | 62.5% | **87.5%** | 75.0% |
+| paraphrase | **87.5%** | 50.0% | **87.5%** |
+| contextual | 83.3% | 83.3% | 83.3% |
+| multi_message | **83.3%** | 50.0% | 66.7% |
+| exact_term | 0.0% | **85.7%** | 42.9% |
+| **credential** | 0.0% | 0.0% | **0.0%** |
+
+RRF is the best retriever at depth: Recall@3 +15.8 over vector and +7.9 over
+BM25, Recall@5 92.1%, best MRR. It recovers `paraphrase` to the vector level
+(87.5%) *while* keeping `exact_term` far above vector (42.9% vs 0.0%) — the
+complementarity held. Every category reaches 100% by Recall@3 except
+`paraphrase` and `credential`.
+
+| Question | Vector | BM25 | RRF |
+|---|---|---|---|
+| E6 `TCS` | never | 1 | **1** |
+| E1 "What is Sneha building?" | never | 1 | **2** |
+| P5 "…going away on holiday?" | never | 2 | **4** |
+| P4 "Which firms…recruit?" | 1 | never | **1** |
+| P8 "Is the pay any good?" | 1 | never | **1** |
+| **X1 "What is my gmail password?"** | **6** | never | **never** |
+
+### RRF makes the credential case worse — and it is not a reach problem
+
+The required verification, run directly against the candidate sets:
+
+```
+QUERY: 'What is my gmail password?'   (RRF_K=60, candidates=50)
+  vector :  50 candidates | credential at rank(s) [6, 27]
+  bm25   :  27 candidates | credential at rank(s) ABSENT
+  -> credential chunk IS in the fused candidate union: True
+  -> after fusion it lands at rank 28  (score 0.01515, provenance {'vector': 6})
+```
+
+**The credential chunk WAS in the candidate set.** Fusion had it and demoted it
+from vector's rank 6 to 28. The cause is arithmetic, not tuning:
+
+```
+best possible single-retriever score = 1/(60 + 1)  = 0.016393
+worst possible two-retriever score   = 2/(60 + 50) = 0.018182
+```
+
+At `RRF_K=60` with a 50-deep candidate list, **any chunk both retrievers return
+outranks any chunk only one returns, whatever their positions.** The credential
+is visible to vector alone, so it can never beat the crowd of chunks the two
+retrievers agree on. All three credential questions go to 0.0% at every K,
+including Recall@10, where vector alone had X1@6, X2@3, X3@7.
+
+This is what RRF means, not a defect — but it is a real trade-off, pinned in
+`test_agreement_strictly_dominates_rank_at_the_default_settings`. The dominance
+disappears below roughly K=50 at this depth (K=30: single@1 0.0323 vs
+double@50,50 0.0250).
+
+**RRF does not fix the credential problem. It regresses it.**
+
+### Scores after fusion
+
+RRF scores are ~0.03 and span a range of 0.0035 between correct and best
+irrelevant — they are fusion artifacts, not confidence. `MIN_RETRIEVAL_SCORE`
+(0.25, untouched) would abstain on every query under RRF. Any gate on a fused
+retriever needs a calibrated score, which fusion does not provide.
+
 ## What this baseline is for
 
 Any Phase 2 change (BM25, hybrid, reranking, semantic chunking) must be measured

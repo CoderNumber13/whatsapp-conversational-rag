@@ -129,6 +129,17 @@ class Config:
     )
     max_context_chunks: int = field(default_factory=lambda: _get_int("MAX_CONTEXT_CHUNKS", 8))
 
+    # Reciprocal Rank Fusion. RRF_K damps the influence of top ranks: the
+    # contribution of a result at rank r is 1/(RRF_K + r), so a large K flattens
+    # the curve and lets agreement between retrievers outweigh any single
+    # retriever's confidence. 60 is the value from Cormack et al. (2009), which
+    # introduced RRF, and is the near-universal default.
+    rrf_k: int = field(default_factory=lambda: _get_int("RRF_K", 60))
+    # How deep to read each retriever before fusing. Must exceed the final k, or
+    # fusion has nothing to disagree about; 50 keeps every candidate either
+    # retriever ranked plausibly while staying cheap.
+    rrf_candidates: int = field(default_factory=lambda: _get_int("RRF_CANDIDATES", 50))
+
     # Paths
     uploads_dir: Path = field(
         default_factory=lambda: (REPO_ROOT / _get("UPLOADS_DIR", "data/private/uploads"))

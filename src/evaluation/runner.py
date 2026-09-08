@@ -51,8 +51,9 @@ def run_eval(
     """
     if scale not in ("sample", "large"):
         raise ValueError(f"unknown scale {scale!r} (want 'sample' or 'large')")
-    if retriever not in ("vector", "bm25"):
-        raise ValueError(f"unknown retriever {retriever!r} (want 'vector' or 'bm25')")
+    if retriever not in ("vector", "bm25", "rrf"):
+        raise ValueError(
+            f"unknown retriever {retriever!r} (want 'vector', 'bm25' or 'rrf')")
     tmp = Path(workdir) if workdir else Path(tempfile.mkdtemp(prefix="convmem-eval-"))
     owned = workdir is None
     try:
@@ -87,13 +88,20 @@ def run_eval(
             ]
             expected = resolve_expectations(questions, messages)
 
-            if retriever == "bm25":
-                from src.retrieval.keyword_search import BM25Search
+            if retriever != "vector":
                 from src.retrieval.retriever import Retriever
 
                 # same Retriever, same filters, same context expansion — only
                 # the searcher differs, so the comparison isolates ranking
-                pipe._retriever = Retriever(pipe.db, BM25Search.open(pipe.db, cfg), cfg)
+                if retriever == "bm25":
+                    from src.retrieval.keyword_search import BM25Search
+
+                    searcher = BM25Search.open(pipe.db, cfg)
+                else:
+                    from src.retrieval.hybrid_search import RRFHybridSearch
+
+                    searcher = RRFHybridSearch.open(pipe.db, cfg)
+                pipe._retriever = Retriever(pipe.db, searcher, cfg)
 
             # warm up so the first question doesn't absorb model/index load
             pipe.retriever.retrieve("warmup", k=1)
