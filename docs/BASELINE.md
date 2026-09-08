@@ -174,6 +174,77 @@ argument for BM25.
 `exact_term` and `credential` are the only categories where the mean irrelevant
 score exceeds the mean correct score.
 
+## Experiment 1 — BM25 (lexical), standalone
+
+Measured **2026-09-09**, `large` scale, identical 44 questions.
+`python scripts/run_eval.py --scale large --retriever bm25`
+
+| Metric | Vector | BM25 | Δ |
+|---|---|---|---|
+| Recall@1 | 57.9% | **65.8%** | **+7.9** |
+| Recall@3 | 73.7% | **81.6%** | **+7.9** |
+| Recall@5 | 76.3% | **86.8%** | **+10.5** |
+| Recall@10 | **92.1%** | 89.5% | −2.6 |
+| MRR | 0.682 | **0.749** | **+0.067** |
+| Latency (mean) | 15.9 ms | **2.9 ms** | **5.5× faster** |
+
+| Category | n | Vector R@1 | BM25 R@1 | Δ |
+|---|---|---|---|---|
+| direct | 8 | 62.5% | **87.5%** | +25.0 |
+| paraphrase | 8 | **87.5%** | 50.0% | **−37.5** |
+| contextual | 6 | 83.3% | 83.3% | 0 |
+| multi_message | 6 | **83.3%** | 50.0% | **−33.3** |
+| **exact_term** | 7 | 0.0% | **85.7%** | **+85.7** |
+| **credential** | 3 | 0.0% | 0.0% | 0 |
+
+### The four target questions
+
+| Q | Vector rank | BM25 rank |
+|---|---|---|
+| E6 `TCS` | never in top 10 | **1** |
+| E1 "What is Sneha building?" | never in top 10 | **1** |
+| P5 "When are we going away on holiday?" | never in top 10 | **2** |
+| X1 "What is my gmail password?" | 6 | **never retrieved** |
+
+BM25 rescues all three lexical misses outright. E7 `CGPA` and E5 `gaming night`
+also go to rank 1.
+
+### BM25 makes the credential case worse
+
+X1 goes from rank 6 to **no result at all**, and X3 likewise. The cause is
+structural, not tuning: the credential is a bare token, so the query terms
+*gmail* and *password* share nothing with the chunk holding it — while the
+password distractors contain both terms and rank confidently. Dense retrieval at
+least placed the right chunk 6th on weak topical similarity; BM25 requires a
+term in common and there is none.
+
+**Neither retriever can answer X1, so fusing them will not answer it either.**
+
+### Where BM25 loses
+
+`paraphrase` (−37.5) and `multi_message` (−33.3) are the cost of having no
+synonym knowledge. Two questions score zero on every chunk and return nothing:
+P4 "Which firms are visiting campus to recruit?" (corpus says *"coming for the
+pre-placement talk"*) and P8 "Is the pay any good?" (corpus says *"stipend"*).
+
+Contributing to this: BM25Okapi's IDF is exactly 0 for a term in half the
+chunks and negative beyond, so common-word queries can score zero everywhere.
+
+### Scores are not comparable
+
+Cosine is bounded in [−1, 1]; BM25 is an unbounded corpus-relative sum (max
+observed 20.8). `MIN_RETRIEVAL_SCORE=0.25` is meaningless against BM25 scores —
+it keeps 36/38 answerable and rejects 0/6 absent. Any fusion must combine
+**ranks** (e.g. RRF) or normalise per-searcher; naive score addition would let
+BM25 dominate entirely. The abstain gate is unchanged.
+
+### Verdict
+
+BM25 does exactly what the baseline predicted it would — it fixes `exact_term`
+(0% → 85.7%) and every lexical miss — and it is complementary rather than
+superior: it wins where dense retrieval fails and fails where dense retrieval
+wins. It does **not** fix the credential failure that started this work.
+
 ## What this baseline is for
 
 Any Phase 2 change (BM25, hybrid, reranking, semantic chunking) must be measured
