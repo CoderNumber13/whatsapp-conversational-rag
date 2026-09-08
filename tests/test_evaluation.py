@@ -20,8 +20,9 @@ from src.evaluation.dataset import (
     EvalQuestion,
     resolve_expectations,
 )
+from src.evaluation.corpus import CREDENTIAL_TOKEN, generate_large_corpus
 from src.evaluation.metrics import QuestionResult, summarize, threshold_analysis
-from src.evaluation.runner import run_eval
+from src.evaluation.runner import SAMPLE_DIR, run_eval
 
 
 def _r(qid, rank, *, absent=False, top=0.5, correct=None, irrel=None, ms=1.0):
@@ -140,3 +141,66 @@ def test_benchmark_runs_and_expectations_still_match_the_corpus():
         assert r.n_retrieved <= 5
         if r.is_absent:
             assert r.first_relevant_rank is None
+
+
+# --- production-scale corpus ------------------------------------------
+
+def test_large_corpus_is_deterministic(tmp_path):
+    """A benchmark corpus that changes between runs makes every comparison
+    meaningless, so generation must be byte-for-byte reproducible."""
+    a = generate_large_corpus(tmp_path / "a", SAMPLE_DIR)
+    b = generate_large_corpus(tmp_path / "b", SAMPLE_DIR)
+    assert [p.name for p in a] == [p.name for p in b]
+    for pa, pb in zip(a, b):
+        assert pa.read_text(encoding="utf-8") == pb.read_text(encoding="utf-8")
+
+
+def test_large_corpus_is_deep_enough_for_recall_at_10(tmp_path):
+    """The point of this corpus: k=10 must be a real top-10, not the whole set."""
+    files = generate_large_corpus(tmp_path / "c", SAMPLE_DIR)
+    total = sum(len(f.read_text(encoding="utf-8").splitlines()) for f in files)
+    assert len(files) >= 12, "too few conversations to model a real export"
+    assert total > 1000, "corpus too small for Recall@5/@10 to discriminate"
+
+
+def test_large_corpus_keeps_the_sample_chats_verbatim(tmp_path):
+    """Gold answers live in the tracked sample chats; copying them unchanged is
+    what makes the two scales comparable."""
+    files = generate_large_corpus(tmp_path / "c", SAMPLE_DIR)
+    by_name = {f.name: f for f in files}
+    for src in SAMPLE_DIR.glob("*.txt"):
+        assert src.name in by_name
+        assert by_name[src.name].read_text(encoding="utf-8") == src.read_text(encoding="utf-8")
+
+
+def test_credential_is_buried_not_sitting_in_a_tiny_chat(tmp_path):
+    """The small corpus fails to reproduce the bug because the credential owns a
+    7-message conversation. Here it must be deep inside a long history."""
+    files = generate_large_corpus(tmp_path / "c", SAMPLE_DIR)
+    karan = next(f for f in files if "Karan" in f.name)
+    lines = karan.read_text(encoding="utf-8").splitlines()
+    assert len(lines) > 60, "credential conversation is not production-length"
+    idx = next(i for i, l in enumerate(lines) if CREDENTIAL_TOKEN in l)
+    assert idx > 10, "credential is too close to the start to be buried"
+    assert sum(CREDENTIAL_TOKEN in l for l in lines) == 1, "credential must appear once"
+
+
+def test_password_distractors_exist_and_carry_no_credential(tmp_path):
+    """The distractors are the mechanism being modelled: chunks that discuss
+    credentials without containing one. Without them the failure vanishes."""
+    files = generate_large_corpus(tmp_path / "c", SAMPLE_DIR)
+    corpus = "\n".join(f.read_text(encoding="utf-8") for f in files)
+    hits = [l for l in corpus.splitlines()
+            if any(w in l.lower() for w in ("password", "login", "otp", "credential"))]
+    assert len(hits) >= 10, "too few password distractors to create competition"
+    assert not any(CREDENTIAL_TOKEN in l for l in hits), (
+        "a distractor leaked the credential — it must never co-occur"
+    )
+
+
+def test_large_scale_benchmark_runs_end_to_end():
+    """Expectations must still resolve uniquely against the bigger corpus."""
+    run = run_eval(embedding_model="mock-64", k=10, scale="large")
+    assert len(run.results) == len(QUESTIONS)
+    assert run.corpus["scale"] == "large"
+    assert run.corpus["chunks"] > 100, "not deep enough for k=10 to be meaningful"

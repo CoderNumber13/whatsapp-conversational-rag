@@ -31,17 +31,19 @@ def main() -> int:
     ap.add_argument("--k", type=int, default=10)
     ap.add_argument("--embedding-model", default=None,
                     help="override EMBEDDING_MODEL (e.g. mock-64 for a fast smoke run)")
+    ap.add_argument("--scale", choices=("sample", "large"), default="sample",
+                    help="sample = tracked 7-chunk corpus; large = production scale")
     ap.add_argument("--json", type=Path, default=None)
     args = ap.parse_args()
 
-    run = run_eval(k=args.k, embedding_model=args.embedding_model)
+    run = run_eval(k=args.k, embedding_model=args.embedding_model, scale=args.scale)
     s, c = run.summary, run.corpus
 
     print("=" * 78)
     print("RETRIEVAL BASELINE — vector-only (no BM25, no hybrid, no rerank)")
     print("=" * 78)
-    print(f"corpus     : {c['messages']} messages / {c['conversations']} conversations "
-          f"/ {c['chunks']} chunks")
+    print(f"corpus     : {c['scale']} scale - {c['messages']} messages / "
+          f"{c['conversations']} conversations / {c['chunks']} chunks")
     print(f"embedder   : {c['embedding_model']}")
     print(f"chunking   : {c['chunk_size_messages']} msgs, "
           f"{c['chunk_overlap_messages']} overlap   probe k={c['probe_k']}")

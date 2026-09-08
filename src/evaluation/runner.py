@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Optional, Sequence
 
 from src.config import Config
+from src.evaluation.corpus import generate_large_corpus
 from src.evaluation.dataset import QUESTIONS, EvalQuestion, build_corpus, resolve_expectations
 from src.evaluation.metrics import QuestionResult, Summary, by_category, summarize
 
@@ -38,7 +39,12 @@ def run_eval(
     k: int = PROBE_K,
     embedding_model: Optional[str] = None,
     workdir: Optional[Path] = None,
+    scale: str = "sample",
 ) -> EvalRun:
+    """`scale="sample"` is the 7-chunk tracked corpus; `scale="large"` adds
+    production-scale filler and distractors around the same gold answers."""
+    if scale not in ("sample", "large"):
+        raise ValueError(f"unknown scale {scale!r} (want 'sample' or 'large')")
     tmp = Path(workdir) if workdir else Path(tempfile.mkdtemp(prefix="convmem-eval-"))
     owned = workdir is None
     try:
@@ -59,7 +65,11 @@ def run_eval(
             cfg = Config.reload()
             from src.pipeline.rag_pipeline import RagPipeline
 
-            files = build_corpus(tmp / "corpus", SAMPLE_DIR)
+            files = (
+                generate_large_corpus(tmp / "corpus", SAMPLE_DIR)
+                if scale == "large"
+                else build_corpus(tmp / "corpus", SAMPLE_DIR)
+            )
             pipe = RagPipeline(cfg)
             pipe.ingest(files, me_names=["Me"])
 
@@ -99,6 +109,7 @@ def run_eval(
                 ))
 
             corpus = {
+                "scale": scale,
                 "messages": len(messages),
                 "conversations": len(pipe.db.conversation_ids()),
                 "chunks": pipe.db.count_chunks(),
