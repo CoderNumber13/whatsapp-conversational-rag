@@ -40,7 +40,7 @@ without exposing anyone's private conversations.
 | **2 — Better retrieval** | conversation-aware chunking, metadata filtering, keyword/BM25, hybrid retrieval, reranking, context reconstruction | **PARTIAL** |
 | **3 — Graph RAG** | entity + relationship extraction, graph construction, community detection, community summaries, local + global graph retrieval | **TODO** |
 | **4 — Agent** | query understanding, retrieval/conversation tools, agent planning, multi-step retrieval | **TODO** |
-| **5 — Evaluation** | benchmark questions, baseline, Recall@K, strategy comparison, faithfulness, latency | **TODO** |
+| **5 — Evaluation** | benchmark questions, baseline, Recall@K, strategy comparison, faithfulness, latency | **PARTIAL** — retrieval baseline done, see [BASELINE.md](BASELINE.md) |
 | **6 — Productionization** | privacy controls, config, logging, error handling, Docker, docs, synthetic dataset, clean git | **PARTIAL** |
 
 ### Phase 2 breakdown (current phase)
