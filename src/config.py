@@ -140,6 +140,16 @@ class Config:
     # retriever ranked plausibly while staying cheap.
     rrf_candidates: int = field(default_factory=lambda: _get_int("RRF_CANDIDATES", 50))
 
+    # Cross-encoder reranking. The model reads (query, chunk) together, so it
+    # costs one forward pass per candidate and is applied only to a shortlist.
+    # MiniLM-L-6 is ~80MB and runs on CPU. Its scores are unbounded logits and
+    # are NOT comparable with cosine, BM25 or RRF values.
+    rerank_model: str = field(
+        default_factory=lambda: _get("RERANK_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2")
+    )
+    rerank_candidates: int = field(default_factory=lambda: _get_int("RERANK_CANDIDATES", 20))
+    rerank_max_length: int = field(default_factory=lambda: _get_int("RERANK_MAX_LENGTH", 512))
+
     # Paths
     uploads_dir: Path = field(
         default_factory=lambda: (REPO_ROOT / _get("UPLOADS_DIR", "data/private/uploads"))

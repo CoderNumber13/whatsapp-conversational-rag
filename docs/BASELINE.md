@@ -438,6 +438,83 @@ Changing the default should be a deliberate decision made on more than this one
 synthetic corpus, and none of these configurations addresses the credential
 failure, which remains 0% Recall@1 everywhere.
 
+## Experiment 4 — cross-encoder reranking
+
+Measured **2026-09-09**, `large` scale, same 44 questions.
+`python scripts/rerank_sweep.py`
+
+Pipeline: `vector + BM25 → RRF → candidate pool → cross-encoder → final`.
+Model `cross-encoder/ms-marco-MiniLM-L-6-v2` (~80MB, CPU, `max_length=512`),
+configurable via `RERANK_MODEL` / `RERANK_CANDIDATES` / `RERANK_MAX_LENGTH`.
+Vector, BM25, RRF and `MIN_RETRIEVAL_SCORE` are untouched.
+
+### Depth sweep
+
+| Depth | R@1 | R@3 | R@5 | R@10 | MRR | exact | cred | X1 | P5 | E1 | E6 | latency |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 10 | 68.4% | 86.8% | 92.1% | 92.1% | 0.785 | 57.1% | 0.0% | – | 4 | 2 | 1 | **259 ms** |
+| 20 | 68.4% | 86.8% | 92.1% | 92.1% | 0.785 | 57.1% | 0.0% | – | 4 | 2 | 1 | 519 ms |
+| 30 | 68.4% | 86.8% | 92.1% | 92.1% | 0.785 | 57.1% | 0.0% | – | 4 | 2 | 1 | 773 ms |
+| 50 | 68.4% | 86.8% | 92.1% | 92.1% | 0.785 | 57.1% | 0.0% | – | 4 | 2 | 1 | 1120 ms |
+| *RRF* | *65.8%* | *89.5%* | *92.1%* | *92.1%* | *0.779* | *42.9%* | *0.0%* | *–* | *4* | *2* | *1* | *21 ms* |
+
+**Depth changes nothing but cost.** Quality is identical at every depth; latency
+scales linearly, 259 ms → 1120 ms. Deeper pools add candidates the reranker
+never promotes.
+
+### Acceptance tests
+
+| # | Test | Result |
+|---|---|---|
+| 1 | X1 moves substantially up, ideally rank 1 | ❌ **FAILED** |
+| 2 | credential Recall@1 improves over 0% | ❌ **FAILED** — 0.0% at every depth |
+| 3 | exact_term R@1 does not regress from 42.9% | ✅ **PASSED** — 57.1% (+14.2) |
+| 4 | MRR improves over 0.779 | ✅ **PASSED** — 0.785 (+0.006) |
+
+Also: R@1 68.4% (+2.6), `direct` R@1 100% (from 75%), but **R@3 regressed
+89.5% → 86.8%**.
+
+### The reranker had the credential chunk and demoted it
+
+| Rerank depth | credential chunk in RRF pool at | after reranking |
+|---|---|---|
+| 10 | absent | absent |
+| 20 | absent | absent |
+| 30 | **rank 23** | **rank 28** |
+| 50 | **ranks 23, 36** | **ranks 26, 45** |
+
+At depths 30 and 50 the chunk was in the pool and the cross-encoder ranked it
+*lower* than RRF had. This is now conclusive across all four stages: dense
+retrieval, lexical retrieval, rank fusion, and a cross-encoder that reads query
+and chunk together all fail to connect "gmail password" to an unlabelled token.
+**No ranking method can, because the chunk contains no evidence that the token
+is a password.** The information needed is not in the corpus.
+
+### The real win: scores that finally separate
+
+| Retriever | correct − best irrelevant | best Youden | at floor |
+|---|---|---|---|
+| Vector | +0.0566 | 0.421 | 0.45 |
+| BM25 | +2.4848 | — | — |
+| RRF | +0.0035 | −0.044 (at default) | 0.25 |
+| **Cross-encoder** | **+5.054** | **0.632** | **−3.0** |
+
+On absent questions: correct answers average **−1.000**, absent questions'
+top-1 averages **−8.483** with a maximum of **−3.314** — a margin of **+2.314**
+between the best absent question and the average correct one. A floor at −3.0
+would keep 24/38 answerable while rejecting **6/6** absent.
+
+This is the first stage in the pipeline producing a score worth thresholding on,
+and it is what every earlier threshold analysis said was missing. **No threshold
+is implemented here** — `MIN_RETRIEVAL_SCORE` remains 0.25 and is a cosine
+value that must never be compared against these logits.
+
+### Cost
+
+259 ms at depth 10 versus 21 ms for RRF — 12× slower, and that is the cheapest
+configuration. For a live demo on a laptop this is the dominant cost in the
+retrieval path.
+
 ## What this baseline is for
 
 Any Phase 2 change (BM25, hybrid, reranking, semantic chunking) must be measured

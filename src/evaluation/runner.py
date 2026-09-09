@@ -78,6 +78,7 @@ def run_eval(
     workdir: Optional[Path] = None,
     scale: str = "sample",
     retriever: str = "vector",
+    rerank_depth: Optional[int] = None,
 ) -> EvalRun:
     """`scale="sample"` is the 7-chunk tracked corpus; `scale="large"` adds
     production-scale filler and distractors around the same gold answers.
@@ -88,9 +89,9 @@ def run_eval(
     """
     if scale not in ("sample", "large"):
         raise ValueError(f"unknown scale {scale!r} (want 'sample' or 'large')")
-    if retriever not in ("vector", "bm25", "rrf"):
-        raise ValueError(
-            f"unknown retriever {retriever!r} (want 'vector', 'bm25' or 'rrf')")
+    if retriever not in ("vector", "bm25", "rrf", "rerank"):
+        raise ValueError(f"unknown retriever {retriever!r} "
+                         "(want 'vector', 'bm25', 'rrf' or 'rerank')")
     tmp = Path(workdir) if workdir else Path(tempfile.mkdtemp(prefix="convmem-eval-"))
     owned = workdir is None
     try:
@@ -138,6 +139,15 @@ def run_eval(
                     from src.retrieval.hybrid_search import RRFHybridSearch
 
                     searcher = RRFHybridSearch.open(pipe.db, cfg)
+                    if retriever == "rerank":
+                        from src.retrieval.reranker import (
+                            CrossEncoderReranker, RerankedSearch,
+                        )
+
+                        ce = CrossEncoderReranker(config=cfg)
+                        ce.warmup()
+                        searcher = RerankedSearch(
+                            searcher, ce, cfg, candidates=rerank_depth)
                 pipe._retriever = Retriever(pipe.db, searcher, cfg)
 
             # warm up so the first question doesn't absorb model/index load
@@ -148,6 +158,10 @@ def run_eval(
             corpus = {
                 "scale": scale,
                 "retriever": retriever,
+                "rerank_candidates": (
+                    (rerank_depth or cfg.rerank_candidates)
+                    if retriever == "rerank" else None),
+                "rerank_model": cfg.rerank_model if retriever == "rerank" else None,
                 "messages": len(messages),
                 "conversations": len(pipe.db.conversation_ids()),
                 "chunks": pipe.db.count_chunks(),
