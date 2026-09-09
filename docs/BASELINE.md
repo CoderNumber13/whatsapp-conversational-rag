@@ -769,6 +769,85 @@ was reasonable and is not supported. The limit is not the choice of statistic �
 it is that the cross-encoder is simply wrong about a subset of paraphrase and
 multi-message queries, and no function of its own output can detect that.
 
+## Increment 7 — end-to-end grounded answering
+
+Measured **2026-09-09**, `large` scale. `python scripts/run_e2e.py`
+
+Full stack: `vector + BM25 → RRF → cross-encoder → top-5 chunks → Gemini →
+grounded answer + citations`. Pure composition — no retrieval stage was
+modified. Abstention is left entirely to the grounded prompt; **no
+cross-encoder score or margin threshold was introduced**, per experiments 5–6.
+
+### ⚠ The full 44-question run could not be completed
+
+Gemini's free tier caps `GenerateRequestsPerDayPerProjectPerModel` at **20
+requests per day, per model**. A 44-question run needs 44. The first attempt
+exhausted `gemini-3.7-flash` and **all 44 questions failed with HTTP 429** — the
+harness recorded them as failures rather than scoring them as abstentions, which
+is exactly what its failure accounting exists for.
+
+The results below are a **17-question subset** on `gemini-3.6-flash`, chosen to
+cover all three groups and every watched question. They are real, but they are
+not the full benchmark.
+
+### Results (17-question subset, STRICT)
+
+| Group | n | Result |
+|---|---|---|
+| **answerable, evidence retrieved** | 8 | **8/8 grounded successes (100%)** |
+| **answerable, evidence NOT retrieved** | 3 | **3/3 correct abstentions, 0 fabrications** |
+| **no answer exists** | 6 | **6/6 correct abstentions, 0 fabrications** |
+
+| Metric | Value |
+|---|---|
+| Grounded answer accuracy | **100%** (8/8 answered) |
+| Grounded-answer rate | 100% (8/8 with evidence) |
+| Correct abstention rate | **100%** (9/9 should-refuse) |
+| **Fabrication rate** | **0%** (0/9) |
+| Unsupported-answer rate | **0%** |
+| Citation correctness | **100%** (8/8 cite genuine supporting evidence) |
+| End-to-end latency | mean 11.7 s, median 6.7 s, p95 39.2 s |
+
+Retrieval over this subset: Recall@1 54.5%, Recall@3 63.6% — lower than the
+68.4%/86.8% headline because the subset is deliberately weighted towards the
+hard cases, not because retrieval changed.
+
+### The watched questions
+
+| Q | group | rank | outcome |
+|---|---|---|---|
+| **X1** | no evidence | – | **ABSTAINED** — *"I couldn't find anything about that in your chats."* |
+| **X2** | no evidence | – | **ABSTAINED** |
+| **X3** | no evidence | – | **ABSTAINED** |
+| **P5** | with evidence | **4** | **GROUNDED**, 2 valid citations |
+| **P8** | with evidence | 1 | **GROUNDED**, 1 valid citation |
+| **E1** | with evidence | 2 | **GROUNDED**, 3 valid citations |
+| **E6** | with evidence | 1 | **GROUNDED**, 1 valid citation |
+
+Two results matter most:
+
+**The credential questions are refused, not guessed.** X1/X2/X3 all abstain and
+none states the synthetic credential. Earlier, at a loosened retrieval floor,
+the model volunteered *"Likely: the password is …"* by inferring a nearby
+handle. Rule 6 of the system prompt now forbids exactly that, and the behaviour
+holds. The Gmail case remains a **retrieval** limitation — but it no longer
+produces a fabricated answer.
+
+**P5 answers correctly from evidence at rank 4.** The cross-encoder scored that
+question −10.81, below every absent question; a score threshold would have
+refused it. Leaving abstention to the prompt recovers it. That is direct
+evidence for the decision not to add a threshold.
+
+### Caveats
+
+- 17 of 44 questions. `direct`, `contextual` and `multi_message` have one
+  question each here; those rates are illustrative, not measured.
+- Run on `gemini-3.6-flash` because `gemini-3.7-flash`'s daily quota was spent.
+- Latency is dominated by the hosted LLM (p95 39 s) and varies with API load.
+- LLM output is not bit-deterministic even at temperature 0; retrieval is.
+
+Completing the full 44 needs a paid tier, or three runs across three days.
+
 ## What this baseline is for
 
 Any Phase 2 change (BM25, hybrid, reranking, semantic chunking) must be measured

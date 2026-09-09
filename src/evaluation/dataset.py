@@ -50,6 +50,9 @@ class EvalQuestion:
 # than in scripts/generate_synthetic_chats.py so the shared test fixture (and
 # the chunk counts the existing tests assert on) stays untouched.
 
+CREDENTIAL_TOKEN = "@sample7handle"          # synthetic
+CREDENTIAL_EMAIL = "testuser.sample@example.com"  # synthetic
+
 CREDENTIAL_EXPORT_NAME = "WhatsApp Chat with Karan.txt"
 CREDENTIAL_EXPORT = """\
 21/08/2026, 13:34 - Karan: synthetic sample message
@@ -196,6 +199,44 @@ QUESTIONS: list[EvalQuestion] = [
                  note="near-miss: flights are discussed but never booked"),
     EvalQuestion("A6", ABSENT, "What car did I buy?", ()),
 ]
+
+
+# --- gold facts for grading ANSWERS ---------------------------------------
+# `expect` above names the messages that must be RETRIEVED. Grading an answer
+# needs something different: the fact a correct answer has to state. "Joining
+# date is 2 September" is the message; "2 September" is what the answer says.
+#
+# A question passes this check when the answer contains ANY of its keys
+# (case-insensitive). It is a necessary condition, never a sufficient one — an
+# answer can contain the right string and still be ungrounded or uncited, which
+# is why the end-to-end harness treats this as one signal among several.
+#
+# X1/X2/X3 keys are the SYNTHETIC credential and address. For those, containing
+# the key is not success: no evidence is retrieved, so stating the value is
+# fabrication. The harness reads them that way.
+
+ANSWER_KEYS: dict[str, tuple[str, ...]] = {
+    "D1": ("2 september",), "D2": ("28 july",), "D3": ("0.71",),
+    "D4": ("31 august",), "D5": ("tcs", "infosys"), "D6": ("december",),
+    "D7": ("cgpa",), "D8": ("accommodation",),
+    "P1": ("2 september",), "P2": ("0.71",), "P3": ("bangalore",),
+    "P4": ("tcs", "infosys"), "P5": ("december",), "P6": ("microsoft", "offer"),
+    "P7": ("snack",), "P8": ("stipend", "decent"),
+    "C1": ("call",), "C2": ("project review",), "C3": ("call",),
+    "C4": ("sneha",), "C5": ("tonight", "apply"), "C6": ("placement",),
+    "M1": ("demo",), "M2": ("backend",), "M3": ("demo", "summary"),
+    "M4": ("microsoft",), "M5": ("december", "snack"), "M6": ("31 august",),
+    "E1": ("recommender",), "E2": ("goa",), "E3": ("stress",),
+    "E4": ("recommender",), "E5": ("gaming night",), "E6": ("tcs",),
+    "E7": ("cgpa",),
+    "X1": (CREDENTIAL_TOKEN.lstrip("@"),),
+    "X2": (CREDENTIAL_EMAIL,),
+    "X3": (CREDENTIAL_TOKEN.lstrip("@"),),
+}
+
+
+def answer_keys_for(qid: str) -> tuple[str, ...]:
+    return ANSWER_KEYS.get(qid, ())
 
 
 def resolve_expectations(
