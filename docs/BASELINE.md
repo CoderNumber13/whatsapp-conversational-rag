@@ -645,6 +645,130 @@ the rest of the candidates rather than the absolute score), score calibration
 against a held-out set, or letting the grounded prompt keep making the
 abstention call with the cross-encoder score as one input among several.
 
+## Experiment 6 — margin vs absolute score as an abstention signal
+
+Measured **2026-09-09**, `large` scale, same 44 questions, reranker top-20.
+`python scripts/margin_experiment.py`
+
+**Question:** does within-query score *separation* beat the absolute
+cross-encoder logit as an abstention signal? Experiment 5 found the absolute
+score only partially calibrated because logits are calibrated within a query for
+ranking, not across queries. A margin is within-query by construction, so it
+should be immune to that.
+
+Thresholds are derived from the data (every midpoint between observed values),
+not assumed. Scoring goes through the same `calibration.classify` as experiment
+5, so the comparison is exact. **STRICT is the production-relevant accounting.**
+Retrieval is unchanged: R@1 68.4%, R@3 86.8%, R@5 92.1%, MRR 0.785,
+`exact_term` R@1 57.1%, `credential` R@1 0.0%.
+
+### Do the populations separate?
+
+| Signal | answerable-with-evidence | absent | worst absent | positives below it | clean? | ceiling |
+|---|---|---|---|---|---|---|
+| abs top-1 | −11.28 … 8.78 (med −0.15) | −10.94 … −3.31 (med −10.28) | −3.31 | **11/35** | ❌ | 24/35 |
+| margin 1−2 | 0.01 … 12.91 (med 3.45) | 0.01 … 1.46 (med 0.62) | 1.46 | **12/35** | ❌ | 23/35 |
+| margin 1−3 | 0.05 … 17.98 (med 7.40) | 0.17 … 5.27 (med 0.75) | 5.27 | **10/35** | ❌ | 25/35 |
+
+**No signal separates cleanly.** All three interleave. Margins do separate the
+*medians* far more sharply (3.45 vs 0.62 for m12; 7.40 vs 0.75 for m13) than the
+absolute score does, but the tails still overlap and the tails are what a
+threshold has to live in.
+
+### Head to head — best achievable
+
+**STRICT (production-relevant)**
+
+| Signal | threshold | Youden J | precision | recall | F1 | FAR | FRR |
+|---|---|---|---|---|---|---|---|
+| **abs top-1** | −5.077 | **0.717** | 0.967 | **0.829** | **0.892** | 0.111 | **0.171** |
+| margin 1−2 | 2.327 | 0.600 | **1.000** | 0.600 | 0.750 | **0.000** | 0.400 |
+| margin 1−3 | 5.326 | 0.714 | **1.000** | 0.714 | 0.833 | **0.000** | 0.286 |
+
+**LENIENT (for comparison only)**
+
+| Signal | threshold | Youden J | precision | recall | F1 | FAR | FRR |
+|---|---|---|---|---|---|---|---|
+| abs top-1 | −2.833 | 0.632 | 1.000 | 0.632 | 0.774 | 0.000 | 0.368 |
+| margin 1−2 | 1.517 | 0.632 | 1.000 | 0.632 | 0.774 | 0.000 | 0.368 |
+| margin 1−3 | 5.326 | **0.658** | 1.000 | 0.658 | 0.794 | 0.000 | 0.342 |
+
+The absolute score wins its own optimum on J, recall, F1 and FRR — but it gets
+there by accepting one absent question (FAR 0.111). At the **zero-false-accept**
+operating point, which is the one that matters for a grounded system, the
+comparison flips slightly:
+
+| Signal at FAR = 0 | accepted | J | FRR |
+|---|---|---|---|
+| abs top-1 (−3.3) | 24/35 | 0.686 | 0.314 |
+| **margin 1−3 (5.33)** | **25/35** | **0.714** | **0.286** |
+| margin 1−2 (2.33) | 21/35 | 0.600 | 0.400 |
+
+**One question's difference.** On 35 samples that is not a result to act on.
+
+### Category acceptance at each signal's best STRICT threshold
+
+| Category | abs top-1 | margin 1−2 | margin 1−3 |
+|---|---|---|---|
+| direct | 8/8 | 7/8 | 8/8 |
+| **paraphrase** | **4/8** | 4/8 | **2/8** |
+| contextual | 6/6 | 4/6 | 5/6 |
+| multi_message | 4/6 | 2/6 | 3/6 |
+| **exact_term** | **7/7** | **4/7** | **7/7** |
+| credential | 0/3 | 0/3 | 0/3 |
+| absent | 1/6 | **0/6** | **0/6** |
+
+margin 1−2 collapses `exact_term` to 4/7 for a structural reason: overlapping
+chunks from the same conversation score almost identically, so the top-2 gap
+vanishes even when the top hit is right (E1 0.60, E2 0.53, E3 0.78). Using
+top-3 sidesteps that. margin 1−3 in turn halves `paraphrase`.
+
+### Watched questions (at each signal's best STRICT threshold)
+
+| Q | evidence | rank | abs top-1 | margin 1−2 | margin 1−3 |
+|---|---|---|---|---|---|
+| X1 | **NO** | – | abstain (−7.20) | abstain (2.29) | abstain (2.66) |
+| X2 | **NO** | – | abstain (−9.71) | abstain (0.38) | abstain (0.73) |
+| X3 | **NO** | – | abstain (−6.46) | abstain (0.53) | abstain (1.62) |
+| P5 | yes | 4 | abstain (−10.81) | abstain (0.23) | abstain (0.27) |
+| P8 | yes | **1** | abstain (−11.28) | abstain (0.04) | abstain (0.07) |
+| E1 | yes | 2 | **ACCEPT** (−4.35) | abstain (0.59) | **ACCEPT** (6.55) |
+| E6 | yes | 1 | **ACCEPT** (0.38) | **ACCEPT** (10.73) | **ACCEPT** (10.94) |
+
+Two things worth flagging:
+
+**X1 nearly defeats margin 1−2.** Its margin is **2.29 — higher than every
+absent question's (max 1.46)**. The signal rates the credential question as more
+answerable than questions that genuinely have no answer, despite no evidence
+being retrieved. It abstains only because the optimum lands at 2.327, 0.04 above
+it. That is luck, not calibration.
+
+**P8 defeats every signal.** Its correct chunk is at rank 1, yet top-1 = −11.28
+and both margins are ~0.05: the top three candidates are indistinguishable.
+Where the cross-encoder is uniformly wrong about a query, neither its level nor
+its spread carries information.
+
+### Answer to the question
+
+**No. Within-query separation is not a better abstention signal than the
+absolute score.**
+
+- Neither separates cleanly; both leave 10–12 of 35 answerable-with-evidence
+  questions below the worst absent question.
+- margin 1−2 is **clearly worse** — lower J, lower recall, and it destroys
+  `exact_term` through chunk overlap.
+- margin 1−3 is **equivalent within noise** — better by one question at zero
+  false acceptance (25 vs 24), worse on J/recall/F1 at each signal's own
+  optimum, and it halves `paraphrase`.
+- Margins do not fix the underlying failure. The same questions (P2, P4, P5, P8)
+  fail under every signal, because the cross-encoder scores those queries badly
+  in *both* level and spread.
+
+The hypothesis that a within-query signal would sidestep cross-query calibration
+was reasonable and is not supported. The limit is not the choice of statistic —
+it is that the cross-encoder is simply wrong about a subset of paraphrase and
+multi-message queries, and no function of its own output can detect that.
+
 ## What this baseline is for
 
 Any Phase 2 change (BM25, hybrid, reranking, semantic chunking) must be measured
