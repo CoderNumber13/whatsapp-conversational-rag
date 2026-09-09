@@ -9,15 +9,24 @@ so you can see why it said what it said.
 
 from __future__ import annotations
 
-from datetime import datetime, time
-from pathlib import Path
+# MUST be first: faiss-cpu and torch link different OpenMP runtimes and the
+# second to initialise aborts the process (exit 3, no traceback). See
+# src/runtime.py for the evidence and the proper environment-level fix.
+from src.runtime import init_native_runtimes  # isort:skip
 
-import requests
-import streamlit as st
+init_native_runtimes()  # noqa: E402
 
-from src.config import Config
-from src.pipeline.rag_pipeline import RagPipeline
-from src.retrieval.retriever import RetrievalFilters
+from datetime import datetime, time  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+import requests  # noqa: E402
+import streamlit as st  # noqa: E402
+
+from src.config import Config  # noqa: E402
+from src.llm.base import LLMError  # noqa: E402
+from src.pipeline.full_stack import GroundedAnswerer  # noqa: E402
+from src.pipeline.rag_pipeline import RagPipeline  # noqa: E402
+from src.retrieval.retriever import RetrievalFilters  # noqa: E402
 
 SAMPLE_DIR = Path(__file__).parent / "data" / "sample" / "synthetic_chats"
 
@@ -31,9 +40,19 @@ def get_pipeline() -> RagPipeline:
     return RagPipeline(Config.reload())
 
 
+@st.cache_resource
+def get_answerer(_pipe: RagPipeline, rerank: bool) -> GroundedAnswerer:
+    """Full stack: vector + BM25 -> RRF -> (cross-encoder) -> LLM.
+
+    Cached because the cross-encoder is a ~80MB model load. Built on first
+    question rather than at import so the app starts promptly.
+    """
+    return GroundedAnswerer(_pipe, rerank=rerank)
+
+
 def llm_status(cfg: Config) -> tuple[bool, str]:
     if cfg.llm_provider == "mock":
-        return True, "mock LLM"
+        return True, "mock LLM (canned answers)"
     if cfg.llm_provider == "ollama":
         try:
             r = requests.get(f"{cfg.ollama_host.rstrip('/')}/api/tags", timeout=3)
@@ -48,13 +67,34 @@ def llm_status(cfg: Config) -> tuple[bool, str]:
             return False, f"ollama unreachable at {cfg.ollama_host}"
     if cfg.llm_provider == "gemini":
         return bool(cfg.gemini_api_key), (
-            f"gemini · {cfg.gemini_model}" if cfg.gemini_api_key else "GEMINI_API_KEY not set"
+            f"gemini · {cfg.gemini_model}"
+            if cfg.gemini_api_key
+            else "GEMINI_API_KEY not set — add it to .env"
         )
     if cfg.llm_provider == "openai":
         return bool(cfg.openai_api_key), (
-            f"openai · {cfg.openai_model}" if cfg.openai_api_key else "OPENAI_API_KEY not set"
+            f"openai · {cfg.openai_model}"
+            if cfg.openai_api_key
+            else "OPENAI_API_KEY not set — add it to .env"
         )
     return False, f"unknown provider {cfg.llm_provider!r}"
+
+
+def friendly_llm_error(exc: Exception) -> str:
+    """Turn provider failures into something a demo audience can act on."""
+    text = str(exc)
+    if "429" in text or "RESOURCE_EXHAUSTED" in text:
+        return ("The model's request quota is exhausted. Free Gemini tiers allow "
+                "only a handful of requests per day per model — wait, switch "
+                "GEMINI_MODEL in .env, or use a paid key.")
+    if "503" in text or "UNAVAILABLE" in text:
+        return "The model is temporarily overloaded. Try again in a moment."
+    if "404" in text or "NOT_FOUND" in text:
+        return ("That model name is not available to this API key. Update "
+                "GEMINI_MODEL in .env (see README for how to list valid names).")
+    if "not set" in text.lower() or "api_key" in text.lower():
+        return "No API key configured. Set GEMINI_API_KEY in .env and restart."
+    return text
 
 
 pipe = get_pipeline()
@@ -80,23 +120,39 @@ with st.sidebar:
             p = cfg.uploads_dir / f.name
             p.write_bytes(f.getbuffer())
             paths.append(p)
-        with st.spinner(f"Ingesting {len(paths)} file(s)…"):
-            rep = pipe.ingest(paths, me_names=[s.strip() for s in me_names.split(",") if s.strip()])
-        st.success(
-            f"+{rep.messages_added} messages · {rep.conversations} conversations · "
-            f"chunks +{rep.chunks.added}/~{rep.chunks.updated} · "
-            f"embedded {rep.index.embedded + rep.index.reembedded}"
-        )
-        get_pipeline.clear()  # drop cached retriever so the new index is picked up
-        st.rerun()
+        try:
+            with st.spinner(f"Ingesting {len(paths)} file(s)…"):
+                rep = pipe.ingest(
+                    paths, me_names=[s.strip() for s in me_names.split(",") if s.strip()]
+                )
+        except Exception as e:
+            st.error(f"Ingestion failed — {type(e).__name__}: {e}")
+        else:
+            if rep.messages_added == 0:
+                st.warning(
+                    "No new messages were parsed. The file may be empty, already "
+                    "ingested, or not a WhatsApp export."
+                )
+            else:
+                st.success(
+                    f"+{rep.messages_added} messages · {rep.conversations} conversations · "
+                    f"chunks +{rep.chunks.added}/~{rep.chunks.updated} · "
+                    f"embedded {rep.index.embedded + rep.index.reembedded}"
+                )
+            # the index changed, so drop the cached searchers (not the DB)
+            get_answerer.clear()
+            st.rerun()
 
     if col_b.button("Load sample", use_container_width=True, key="btn_sample"):
         files = sorted(SAMPLE_DIR.glob("*.txt"))
-        with st.spinner("Ingesting synthetic sample chats…"):
-            rep = pipe.ingest(files, me_names=["Me"])
-        st.success(f"Loaded {rep.conversations} sample conversations.")
-        get_pipeline.clear()
-        st.rerun()
+        if not files:
+            st.error(f"No sample exports found in {SAMPLE_DIR}")
+        else:
+            with st.spinner("Ingesting synthetic sample chats…"):
+                rep = pipe.ingest(files, me_names=["Me"])
+            st.success(f"Loaded {rep.conversations} sample conversations.")
+            get_answerer.clear()
+            st.rerun()
 
     st.divider()
     stats = db.stats()
@@ -114,8 +170,20 @@ with st.sidebar:
     st.caption(f"🔤 embeddings: {cfg.embedding_model}")
 
     with st.expander("Retrieval settings"):
-        top_k = st.slider("top-k chunks", 1, 20, cfg.retrieval_top_k)
-        min_score = st.slider("min cosine score (abstain below)", 0.0, 1.0, cfg.min_retrieval_score, 0.01)
+        top_k = st.slider("evidence chunks sent to the LLM", 1, 20,
+                          cfg.max_context_chunks)
+        rerank = st.checkbox(
+            "cross-encoder reranking", value=True,
+            help="Reorders candidates by reading query and chunk together. "
+                 "Loads a ~80MB model on first use and adds ~0.3s per query.",
+        )
+        st.caption(
+            "Retrieval: vector + BM25 → RRF"
+            + (" → cross-encoder" if rerank else "")
+            + ". Whether to answer is decided by the grounded prompt, not by a "
+              "score threshold — retrieval scores are not comparable across "
+              "stages, so there is no slider for it."
+        )
 
 
 # --- main: ask ----------------------------------------------------
@@ -127,7 +195,10 @@ if db.count_chunks() == 0:
     st.stop()
 
 convs = db.list_conversations()
-conv_by_label = {f"{c['name']}{' (group)' if c['is_group'] else ''}": c["conversation_id"] for c in convs}
+conv_by_label = {
+    f"{c['name']}{' (group)' if c['is_group'] else ''}": c["conversation_id"]
+    for c in convs
+}
 
 with st.form("ask"):
     question = st.text_input(
@@ -140,7 +211,10 @@ with st.form("ask"):
     sender = fc2.text_input("From sender", key="f_sender")
     d_from = fc3.date_input("From date", value=None, key="f_from")
     d_to = fc4.date_input("To date", value=None, key="f_to")
-    submitted = st.form_submit_button("Ask", type="primary")
+    submitted = st.form_submit_button("Ask", type="primary", disabled=not ok)
+
+if not ok:
+    st.error(f"Can't answer yet: {msg}")
 
 if submitted and question.strip():
     filters = RetrievalFilters(
@@ -150,25 +224,32 @@ if submitted and question.strip():
         date_to=datetime.combine(d_to, time.max) if d_to else None,
     )
     has_filters = any(v is not None for v in filters.as_kwargs().values())
-    with st.spinner("Retrieving and answering…"):
-        try:
-            ans = pipe.answer(
-                question,
-                filters=filters if has_filters else None,
-                k=top_k,
-                min_score=min_score,
+    try:
+        with st.spinner("Loading retrieval stack…" if rerank else "Preparing…"):
+            answerer = get_answerer(pipe, rerank)
+        with st.spinner("Retrieving and answering…"):
+            ans = answerer.answer(
+                question, filters=filters if has_filters else None, k=top_k
             )
-        except Exception as e:  # LLM down, etc.
-            st.error(f"{type(e).__name__}: {e}")
-            st.stop()
+    except LLMError as e:
+        st.error(friendly_llm_error(e))
+        st.stop()
+    except Exception as e:
+        st.error(f"{type(e).__name__}: {e}")
+        st.stop()
 
-    if ans.abstained:
-        st.warning(ans.text + f"  \n_(nothing retrieved above the score floor; best was {ans.top_score:.2f})_")
-    elif not ans.supported:
+    if not ans.supported:
+        # Either the model emitted NOT_FOUND, or every citation it produced was
+        # invented and therefore dropped. Both mean: not grounded, so don't
+        # present it as an answer.
         st.warning(ans.text)
+        st.caption(
+            "The system refuses rather than guessing when the retrieved "
+            "conversations don't support an answer."
+        )
     else:
         st.markdown(f"### Answer\n{ans.text}")
-        st.caption(f"model: {ans.llm_model} · top score {ans.top_score:.2f} · {len(ans.citations)} citation(s)")
+        st.caption(f"model: {ans.llm_model} · {len(ans.citations)} citation(s)")
 
     if ans.citations:
         st.markdown("#### Sources")
@@ -181,6 +262,11 @@ if submitted and question.strip():
             )
 
     with st.expander(f"Retrieval inspection — {len(ans.retrieved)} chunk(s)"):
+        st.caption(
+            "Scores come from the last retrieval stage and are only comparable "
+            "within this list: cosine for vector-only, an RRF fusion value, or a "
+            "cross-encoder logit (unbounded, often negative) when reranking is on."
+        )
         cited_ids = {c.message_id for c in ans.citations}
         for i, rc in enumerate(ans.retrieved, 1):
             used = "✅ cited" if cited_ids & {m.message_id for m in rc.messages} else "—"
