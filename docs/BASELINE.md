@@ -515,6 +515,136 @@ value that must never be compared against these logits.
 configuration. For a live demo on a laptop this is the dominant cost in the
 retrieval path.
 
+## Experiment 5 — cross-encoder abstention calibration
+
+Measured **2026-09-09**, `large` scale, same 44 questions, reranker top-20.
+`python scripts/rerank_calibration.py`
+
+An **abstention** gate, not a ranking one: accept if the top-1 cross-encoder
+score ≥ threshold, otherwise refuse to answer. Ordering is never touched.
+`MIN_RETRIEVAL_SCORE=0.25` is a cosine threshold, untouched and not used here.
+**Nothing is applied to production.**
+
+### Two ways to count an acceptance
+
+Three answerable questions — **X1, X2, X3** — have *no relevant chunk retrieved
+at all*. Accepting them cannot produce a grounded answer; it hands the LLM
+irrelevant context and invites a confident wrong answer. So both accountings are
+reported: **LENIENT** (accepted + answerable = success) and **STRICT** (also
+requires that real evidence was retrieved).
+
+### LENIENT
+
+| thr | ansAcc | ansRej | absRej | absAcc | prec | recall | F1 | Youden J | FAR | FRR |
+|---|---|---|---|---|---|---|---|---|---|---|
+| −10.0 | 34 | 4 | 3 | 3 | 0.919 | 0.895 | 0.907 | 0.395 | 0.500 | 0.105 |
+| −8.0 | 32 | 6 | 4 | 2 | 0.941 | 0.842 | 0.889 | 0.509 | 0.333 | 0.158 |
+| −6.0 | 30 | 8 | 4 | 2 | 0.938 | 0.789 | 0.857 | 0.456 | 0.333 | 0.211 |
+| −5.0 | 29 | 9 | 5 | 1 | 0.967 | 0.763 | 0.853 | 0.596 | 0.167 | 0.237 |
+| −4.0 | 25 | 13 | 5 | 1 | 0.962 | 0.658 | 0.781 | 0.491 | 0.167 | 0.342 |
+| −3.5 | 24 | 14 | 5 | 1 | 0.960 | 0.632 | 0.762 | 0.465 | 0.167 | 0.368 |
+| **−3.3** | 24 | 14 | **6** | **0** | **1.000** | 0.632 | 0.774 | **0.632** | **0.000** | 0.368 |
+| −3.0 | 24 | 14 | 6 | 0 | 1.000 | 0.632 | 0.774 | 0.632 | 0.000 | 0.368 |
+| −2.5 | 24 | 14 | 6 | 0 | 1.000 | 0.632 | 0.774 | 0.632 | 0.000 | 0.368 |
+| −2.0 | 23 | 15 | 6 | 0 | 1.000 | 0.605 | 0.754 | 0.605 | 0.000 | 0.395 |
+| −1.5 | 23 | 15 | 6 | 0 | 1.000 | 0.605 | 0.754 | 0.605 | 0.000 | 0.395 |
+| −1.0 | 22 | 16 | 6 | 0 | 1.000 | 0.579 | 0.733 | 0.579 | 0.000 | 0.421 |
+
+### STRICT
+
+| thr | ansAcc | ansRej | absRej | absAcc | prec | recall | F1 | Youden J | FAR | FRR |
+|---|---|---|---|---|---|---|---|---|---|---|
+| −10.0 | 31 | 4 | 3 | 6 | 0.838 | 0.886 | 0.861 | 0.219 | 0.667 | 0.114 |
+| −8.0 | 30 | 5 | 5 | 4 | 0.882 | 0.857 | 0.870 | 0.413 | 0.444 | 0.143 |
+| −6.0 | 30 | 5 | 7 | 2 | 0.938 | 0.857 | 0.896 | 0.635 | 0.222 | 0.143 |
+| **−5.0** | 29 | 6 | 8 | 1 | 0.967 | 0.829 | 0.892 | **0.717** | 0.111 | 0.171 |
+| −4.0 | 25 | 10 | 8 | 1 | 0.962 | 0.714 | 0.820 | 0.603 | 0.111 | 0.286 |
+| −3.5 | 24 | 11 | 8 | 1 | 0.960 | 0.686 | 0.800 | 0.575 | 0.111 | 0.314 |
+| −3.3 | 24 | 11 | 9 | 0 | 1.000 | 0.686 | 0.814 | 0.686 | 0.000 | 0.314 |
+| −3.0 | 24 | 11 | 9 | 0 | 1.000 | 0.686 | 0.814 | 0.686 | 0.000 | 0.314 |
+| −2.5 | 24 | 11 | 9 | 0 | 1.000 | 0.686 | 0.814 | 0.686 | 0.000 | 0.314 |
+| −2.0 | 23 | 12 | 9 | 0 | 1.000 | 0.657 | 0.793 | 0.657 | 0.000 | 0.343 |
+| −1.0 | 22 | 13 | 9 | 0 | 1.000 | 0.629 | 0.772 | 0.629 | 0.000 | 0.371 |
+
+The two accountings **disagree about the optimum** (−3.3 vs −5.0), so which one
+is used is a decision, not a detail.
+
+### Acceptance by category
+
+| thr | direct | paraphrase | contextual | multi_msg | exact_term | credential | absent |
+|---|---|---|---|---|---|---|---|
+| −10.0 | 8/8 | **4/8** | 6/6 | 6/6 | 7/7 | 3/3 | 3/6 |
+| −6.0 | 8/8 | **4/8** | 6/6 | 5/6 | 7/7 | **0/3** | 2/6 |
+| −5.0 | 8/8 | 4/8 | 6/6 | 4/6 | 7/7 | 0/3 | 1/6 |
+| −3.3 | 7/8 | 3/8 | 5/6 | 3/6 | 6/7 | 0/3 | **0/6** |
+| −1.0 | 7/8 | 3/8 | 4/6 | 3/6 | 5/7 | 0/3 | 0/6 |
+
+**`paraphrase` never exceeds 4/8, even at −10.** Half of those questions score
+below −10 no matter how permissive the gate.
+
+### Watched questions
+
+| Q | top-1 score | evidence rank | behaviour |
+|---|---|---|---|
+| **E6** `TCS` | +0.38 | 1 | accepted at every threshold ✅ |
+| **E1** | −4.35 | 2 | abstained below −4.0 ❌ |
+| **P5** | −10.81 | 4 | **abstained at every threshold** ❌ |
+| **X1** | −7.20 | none | abstained from −6.0 ✅ *(correctly)* |
+| X2 | −9.71 | none | abstained from −8.0 ✅ |
+| X3 | −6.46 | none | abstained from −6.0 ✅ |
+
+**The credential questions are correctly refused.** From −6.0 down, all three
+abstain. Retrieval cannot reach the credential, but the system can at least
+decline rather than fabricate — the grounded behaviour the project requires.
+
+### The separability ceiling
+
+Absent top-1 scores span **−10.94 … −3.31**. Answerable-with-evidence spans
+**−11.28 … +8.77**. The distributions overlap, and **11 of 35 answerable
+questions whose evidence WAS retrieved score below the worst absent question**:
+
+| Q | category | top-1 | evidence at rank |
+|---|---|---|---|
+| P8 | paraphrase | **−11.28** | **1** |
+| P4 | paraphrase | −11.22 | 3 |
+| P5 | paraphrase | −10.81 | 4 |
+| P2 | paraphrase | −10.08 | 1 |
+| M3 | multi_message | −9.14 | 1 |
+| M1 | multi_message | −5.47 | 2 |
+| C3 | contextual | −4.92 | 1 |
+| M6 | multi_message | −4.88 | 2 |
+| D7 | direct | −4.85 | 1 |
+| E1 | exact_term | −4.35 | 2 |
+| P7 | paraphrase | −3.73 | 1 |
+
+P8 has the **correct chunk at rank 1** scoring −11.28 — eight points below a
+question with no answer at all. Any threshold accepting P8 must accept all six
+absent questions.
+
+**Ceiling: at zero false acceptance, at most 24 of 38 answerable questions can
+be accepted.** The remaining 37% are structurally unreachable.
+
+### Verdict — is the score calibrated enough for a reliable abstention decision?
+
+**Partially. It is by far the best signal in the pipeline, and it is not
+sufficient on its own.**
+
+For it: at −3.3 the gate reaches **zero false acceptances**, precision 1.000, and
+correctly refuses all three credential questions. Youden 0.632 (lenient) /
+0.717 (strict) against vector's best 0.421 and RRF's −0.044.
+
+Against it: that costs a **36.8% false-rejection rate** — 14 of 38 answerable
+questions refused, including ones whose evidence was retrieved at rank 1. The
+cause is that cross-encoder logits are calibrated *within* a query for ranking,
+not *across* queries. Absolute magnitude tracks phrasing as much as evidence
+quality, which is why `paraphrase` collapses.
+
+A single global threshold is therefore the wrong shape for this problem. Options
+worth testing before adopting one: per-question normalisation (top-1 margin over
+the rest of the candidates rather than the absolute score), score calibration
+against a held-out set, or letting the grounded prompt keep making the
+abstention call with the cross-encoder score as one input among several.
+
 ## What this baseline is for
 
 Any Phase 2 change (BM25, hybrid, reranking, semantic chunking) must be measured
