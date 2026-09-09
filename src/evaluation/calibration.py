@@ -118,6 +118,24 @@ class CalibrationPoint:
         return self.lenient.fp
 
 
+def classify(*, is_absent: bool, has_evidence: bool, accepted: bool) -> tuple[str, str]:
+    """Which confusion cell one decision falls in, as ``(lenient, strict)``.
+
+    Extracted so every abstention experiment — absolute score, margin, anything
+    later — scores decisions through one implementation. Two experiments that
+    counted differently would not be comparable.
+    """
+    if is_absent:
+        # no answer exists, so accepting is wrong under either accounting
+        cell = "fp" if accepted else "tn"
+        return cell, cell
+    if accepted:
+        # strict: an acceptance only counts if real evidence was retrieved
+        return "tp", ("tp" if has_evidence else "fp")
+    # abstaining when nothing relevant was retrieved is the right call
+    return "fn", ("fn" if has_evidence else "tn")
+
+
 def calibrate(
     results: Sequence[QuestionResult],
     thresholds: Sequence[float] = DEFAULT_THRESHOLDS,
@@ -139,29 +157,10 @@ def calibrate(
             accepted = r.top_score >= t
             has_evidence = r.first_relevant_rank is not None
 
-            if r.is_absent:
-                # no answer exists: accepting is always wrong
-                if accepted:
-                    lenient.fp += 1
-                    strict.fp += 1
-                else:
-                    lenient.tn += 1
-                    strict.tn += 1
-            else:
-                if accepted:
-                    lenient.tp += 1
-                    # strict: an acceptance only counts if real evidence was found
-                    if has_evidence:
-                        strict.tp += 1
-                    else:
-                        strict.fp += 1
-                else:
-                    lenient.fn += 1
-                    # abstaining with no evidence retrieved is the right call
-                    if has_evidence:
-                        strict.fn += 1
-                    else:
-                        strict.tn += 1
+            len_cell, strict_cell = classify(
+                is_absent=r.is_absent, has_evidence=has_evidence, accepted=accepted)
+            setattr(lenient, len_cell, getattr(lenient, len_cell) + 1)
+            setattr(strict, strict_cell, getattr(strict, strict_cell) + 1)
 
             slot = per_cat.setdefault(r.category, [0, 0])
             slot[0] += int(accepted)
