@@ -5,11 +5,14 @@ your own WhatsApp conversation history. WhatsApp `.txt` exports go in; grounded,
 citation-backed answers come out. WhatsApp is just the first ingestion source —
 the pipeline works on a normalized, source-independent message schema.
 
-> **Status: Phase 1 complete (MVP).** Parser → normalized schema → SQLite →
+> **Status: Phase 1 + Phase 2 retrieval complete.** Parser → normalized schema → SQLite →
 > conversation-aware chunking → embeddings → FAISS → retrieval (+ metadata
 > filters + context reconstruction) → grounded LLM answers with per-message
-> citations → Streamlit UI. Phase 2 (BM25 / hybrid / reranking) and Phase 3
-> (knowledge graph) are next.
+> citations → Streamlit UI, plus BM25 + RRF hybrid retrieval and cross-encoder
+> reranking. Phase 3 (knowledge graph) is next.
+>
+> The system **refuses rather than guesses** when retrieval finds no supporting
+> evidence — see the known limitations in [`docs/PLAN.md`](docs/PLAN.md).
 >
 > Full roadmap and component requirements: [`docs/PLAN.md`](docs/PLAN.md).
 
@@ -31,6 +34,12 @@ Requires **Python 3.12** (3.11 also fine). The installed 3.14 lacks ML wheels.
 conda create -n convmem python=3.12 -y
 conda activate convmem          # REQUIRED: base Python 3.14 has no faiss/torch wheels
 pip install -r requirements.txt
+
+# 1b. RECOMMENDED: replace pip's faiss with the conda build.
+#     faiss-cpu from PyPI links LLVM's OpenMP while torch links Intel's; two
+#     OpenMP runtimes in one process abort it (exit 3, no traceback). The app
+#     works around this in src/runtime.py, but the clean fix is one runtime:
+# pip uninstall -y faiss-cpu && conda install -y -c pytorch faiss-cpu
 
 # 2. config
 cp .env.example .env        # then edit ME_NAMES to your WhatsApp display name(s)
@@ -99,6 +108,26 @@ pipe.answer("what did we decide?", filters=RetrievalFilters(sender="Rahul"))
 `MIN_RETRIEVAL_SCORE`; when the model can't answer from the excerpts it returns
 `supported=False`; citations the model invents are dropped.
 
+### The full retrieval stack
+
+`RagPipeline` alone is vector-only. The stack the benchmarks measure — and what
+the Streamlit app runs — is assembled by `GroundedAnswerer`:
+
+```python
+from src.runtime import init_native_runtimes
+init_native_runtimes()          # must precede faiss/torch; see src/runtime.py
+
+from src.pipeline.full_stack import GroundedAnswerer
+from src.pipeline.rag_pipeline import RagPipeline
+
+answerer = GroundedAnswerer(RagPipeline())    # vector + BM25 -> RRF -> reranker
+ans = answerer.answer("What did Rahul tell me about his internship?")
+```
+
+It deliberately passes **no score floor**: `MIN_RETRIEVAL_SCORE` is a cosine
+threshold and the stack's final scores are cross-encoder logits. Abstention is
+decided by the grounded prompt instead. See `docs/BASELINE.md` for why.
+
 ## Project layout
 
 ```
@@ -107,14 +136,19 @@ src/
   storage/     models.py (normalized schema) · database.py (SQLite = source of truth)
   chunking/    base.py · message_chunker.py · time_chunker.py · service.py
   embeddings/  base.py · sentence_transformer.py · mock.py · factory.py
-  retrieval/   vector_store.py (FAISS) · indexer.py · vector_search.py · retriever.py
+  retrieval/   base.py (ChunkSearcher) · vector_store.py (FAISS) · indexer.py
+               vector_search.py · keyword_search.py (BM25) · hybrid_search.py (RRF)
+               reranker.py (cross-encoder) · retriever.py
   llm/         base.py · factory.py · gemini_client.py · ollama_client.py
                openai_client.py · mock.py · prompts.py
-  pipeline/    rag_pipeline.py
-  graph/ query/ agent/ evaluation/     ← Phase 3+ (scaffolded)
+  pipeline/    rag_pipeline.py · full_stack.py (the assembled stack)
+  evaluation/  dataset.py · corpus.py · metrics.py · runner.py · sweep.py
+               calibration.py · margins.py · end_to_end.py
+  runtime.py                           ← FAISS/torch OpenMP guard
+  graph/ query/ agent/                 ← Phase 3+ (scaffolded)
 app.py                                 ← Streamlit UI
 scripts/generate_synthetic_chats.py
-tests/                                 ← 136 tests
+tests/                                 ← 353 tests
 ```
 
 ## Pipeline
@@ -126,8 +160,9 @@ tests/                                 ← 136 tests
   → SQLite  (authoritative: messages, conversations, chunks, embedding_meta)
   → ChunkingService     conversation-bounded windows, [m:<id>]-tagged text
   → EmbeddingIndexer    all-MiniLM-L6-v2 → FAISS (IndexIDMap2/IP), staleness by content_hash
-  → Retriever           metadata filter → vector search → context window (§14)
-  → RagPipeline.answer   abstain-if-weak → grounded prompt → LLM → validated citations
+  → Retriever           metadata filter → search → context window (§14)
+  → GroundedAnswerer    vector + BM25 → RRF → cross-encoder → top-N chunks
+  → RagPipeline.answer   grounded prompt → LLM → validated citations
 ```
 
 ### Design notes

@@ -8,6 +8,9 @@ requires-python = ">=3.11,<3.13"
 pythonpath = ["."]
 testpaths = ["tests"]
 addopts = "-q"
+markers = [
+    "slow: spawns a subprocess or loads a model; still run by default",
+]
 
 [tool.ruff]
 line-length = 100

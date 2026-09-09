@@ -37,13 +37,80 @@ without exposing anyone's private conversations.
 | Phase | Scope | Status |
 |---|---|---|
 | **1 — MVP** | parser → schema → SQLite → chunking → embeddings → vector search → LLM answers → citations → Streamlit UI | **DONE** |
-| **2 — Better retrieval** | conversation-aware chunking, metadata filtering, keyword/BM25, hybrid retrieval, reranking, context reconstruction | **PARTIAL** |
+| **2 — Better retrieval** | conversation-aware chunking, metadata filtering, keyword/BM25, hybrid retrieval, reranking, context reconstruction | **DONE** (semantic chunking deferred) |
 | **3 — Graph RAG** | entity + relationship extraction, graph construction, community detection, community summaries, local + global graph retrieval | **TODO** |
 | **4 — Agent** | query understanding, retrieval/conversation tools, agent planning, multi-step retrieval | **TODO** |
 | **5 — Evaluation** | benchmark questions, baseline, Recall@K, strategy comparison, faithfulness, latency | **PARTIAL** — retrieval baseline done, see [BASELINE.md](BASELINE.md) |
 | **6 — Productionization** | privacy controls, config, logging, error handling, Docker, docs, synthetic dataset, clean git | **PARTIAL** |
 
-### Phase 2 breakdown (current phase)
+## Status as of 2026-09-09 (commit after f04efd9)
+
+### Complete
+
+- **Phase 1** end to end, plus the Phase 2 retrieval stack:
+  `vector + BM25 → RRF → cross-encoder → top-N chunks → Gemini → cited answer`.
+- A 44-question benchmark on a 1269-message / 144-chunk synthetic corpus, with
+  every stage measured against it ([BASELINE.md](BASELINE.md)).
+- **End-to-end grounded answering.** On the measured subset: grounded-answer
+  accuracy 100%, citation correctness 100%, **fabrication rate 0%**.
+- **The Streamlit demo now runs the stack the experiments measured.** It
+  previously ran vector-only, so the demo and the evidence disagreed.
+- Production OpenMP mitigation, in one documented place (`src/runtime.py`).
+
+### Remaining
+
+- Semantic chunking (Phase 2's last item) — deferred, never measured.
+- Phase 3 knowledge graph, Phase 4 agent — not started.
+- Phase 5: retrieval evaluation is done; **answer** evaluation is only partially
+  run (see the quota limitation below).
+- Phase 6: Docker, and the private-data cleanup listed below.
+
+### Known limitations
+
+**The Gmail credential case (X1/X2/X3) is unsolved and is not a ranking bug.**
+The credential is a bare token that nothing in the corpus identifies as a
+password, so it shares no term or meaning with any phrasing of the question.
+Dense retrieval, BM25, RRF and a cross-encoder each fail on it independently,
+and RRF and the cross-encoder each rank it *lower* than vector search alone did.
+There is no evidence in the corpus to rank on. **Treated as a permanent
+limitation of retrieval, not something to tune around.**
+
+What *is* fixed is the consequence: the system now **refuses instead of
+fabricating**. X1/X2/X3 abstain, and none states the credential. Earlier, at a
+loosened retrieval floor, the model volunteered *"Likely: the password is …"* by
+inferring a nearby handle; system-prompt rule 6 forbids presenting any value as
+a credential unless an excerpt says in words that it is one, and forbids hedging
+such a guess.
+
+**Cross-encoder scores are not globally calibrated.** They rank well within a
+query but their magnitude tracks phrasing as much as evidence quality. At a
+threshold with zero false acceptances, 37% of answerable questions are wrongly
+refused — including P8, whose *correct* chunk at rank 1 scores below every
+question that has no answer. Margins (top1−top2, top1−top3) were tested as an
+alternative and are not better. **Therefore no cross-encoder threshold exists in
+the pipeline**, and `MIN_RETRIEVAL_SCORE` (a cosine value, 0.25) must never be
+compared against a cross-encoder logit. Abstention is the grounded prompt's
+decision. P5 is the proof this matters: its evidence sits at rank 4 with a score
+of −10.81 and it is answered correctly and cited.
+
+**FAISS/torch OpenMP conflict.** `faiss-cpu` (PyPI) links LLVM's OpenMP runtime,
+torch links Intel's. The second to initialise aborts the process with exit code
+3 and no traceback. Import ordering, eager loading, `omp_set_num_threads(1)` and
+restricting to single-query search were each measured and none avoids it; only
+`KMP_DUPLICATE_LIB_OK=TRUE` does. It is therefore set in exactly one place,
+`src/runtime.py`, before the libraries load, with the evidence recorded there.
+**The proper fix is environmental** — `conda install -c pytorch faiss-cpu` links
+the same OpenMP as torch and removes the conflict entirely; the guard then
+becomes a no-op. A regression test asserts both that the workload survives with
+the guard and that it still fails without it, so the workaround can be deleted
+the day it stops being necessary.
+
+**LLM quota.** Gemini's free tier allows 20 requests per day *per model*, so the
+full 44-question end-to-end benchmark cannot be run in one sitting. Results are
+from subsets; the harness records quota failures explicitly rather than scoring
+them as abstentions.
+
+### Phase 2 breakdown
 
 | Item | Status | Where |
 |---|---|---|
