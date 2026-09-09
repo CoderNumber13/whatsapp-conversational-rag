@@ -33,18 +33,23 @@ def main() -> int:
                     help="override EMBEDDING_MODEL (e.g. mock-64 for a fast smoke run)")
     ap.add_argument("--scale", choices=("sample", "large"), default="sample",
                     help="sample = tracked 7-chunk corpus; large = production scale")
-    ap.add_argument("--retriever", choices=("vector", "bm25", "rrf"), default="vector")
+    ap.add_argument("--retriever", choices=("vector", "bm25", "rrf", "rerank"), default="vector")
+    ap.add_argument("--rerank-depth", type=int, default=None,
+                    help="candidates handed to the reranker (default RERANK_CANDIDATES)")
     ap.add_argument("--json", type=Path, default=None)
     args = ap.parse_args()
 
     run = run_eval(k=args.k, embedding_model=args.embedding_model, scale=args.scale,
-                   retriever=args.retriever)
+                   retriever=args.retriever, rerank_depth=args.rerank_depth)
     s, c = run.summary, run.corpus
 
     print("=" * 78)
     _LABEL = {"vector": "VECTOR only (the baseline)", "bm25": "BM25 lexical only",
-              "rrf": "RRF hybrid (vector + BM25, rank fusion)"}
-    print(f"RETRIEVAL EVAL — {_LABEL[c['retriever']]} — no reranking")
+              "rrf": "RRF hybrid (vector + BM25, rank fusion)",
+              "rerank": "RRF + cross-encoder reranking"}
+    print(f"RETRIEVAL EVAL — {_LABEL[c['retriever']]}")
+    if c.get("rerank_candidates"):
+        print(f"reranker   : {c['rerank_model']} over top-{c['rerank_candidates']}")
     print("=" * 78)
     print(f"corpus     : {c['scale']} scale - {c['messages']} messages / "
           f"{c['conversations']} conversations / {c['chunks']} chunks")
