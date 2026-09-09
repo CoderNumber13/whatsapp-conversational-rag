@@ -30,6 +30,11 @@ from src.storage.database import Database
 
 logger = logging.getLogger("conversation_memory.pipeline")
 
+# What the pipeline says when it refuses — from the retrieval gate or from the
+# model emitting NOT_FOUND. Named so callers can recognise a refusal exactly
+# instead of pattern-matching prose.
+NOT_FOUND_MESSAGE = "I couldn't find anything about that in your chats."
+
 _CITE_RE = re.compile(r"\[m:([0-9a-f]+)\]")
 
 
@@ -127,7 +132,7 @@ class RagPipeline:
 
         if not retrieved or top < floor:
             return Answer(
-                text="I couldn't find anything about that in your chats.",
+                text=NOT_FOUND_MESSAGE,
                 supported=False,
                 citations=[],
                 retrieved=retrieved,
@@ -146,7 +151,7 @@ class RagPipeline:
 
         if is_not_found(resp.text):
             return Answer(
-                text="I couldn't find anything about that in your chats.",
+                text=NOT_FOUND_MESSAGE,
                 supported=False,
                 citations=[],
                 retrieved=retrieved,
