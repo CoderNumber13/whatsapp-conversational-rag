@@ -26,6 +26,9 @@ from src.config import Config  # noqa: E402
 from src.llm.base import LLMError  # noqa: E402
 from src.pipeline.full_stack import GroundedAnswerer  # noqa: E402
 from src.pipeline.rag_pipeline import RagPipeline  # noqa: E402
+from src.pipeline.strictness import (  # noqa: E402
+    DEFAULT_MODE, MODES, profile_for,
+)
 from src.retrieval.retriever import RetrievalFilters  # noqa: E402
 
 SAMPLE_DIR = Path(__file__).parent / "data" / "sample" / "synthetic_chats"
@@ -41,13 +44,14 @@ def get_pipeline() -> RagPipeline:
 
 
 @st.cache_resource
-def get_answerer(_pipe: RagPipeline, rerank: bool) -> GroundedAnswerer:
+def get_answerer(_pipe: RagPipeline, rerank: bool, strictness: str) -> GroundedAnswerer:
     """Full stack: vector + BM25 -> RRF -> (cross-encoder) -> LLM.
 
-    Cached because the cross-encoder is a ~80MB model load. Built on first
-    question rather than at import so the app starts promptly.
+    Cached per (rerank, strictness) because the cross-encoder is a ~80MB model
+    load. Built on the first question rather than at import so the app starts
+    promptly.
     """
-    return GroundedAnswerer(_pipe, rerank=rerank)
+    return GroundedAnswerer(_pipe, rerank=rerank, strictness=strictness)
 
 
 def llm_status(cfg: Config) -> tuple[bool, str]:
@@ -170,8 +174,28 @@ with st.sidebar:
     st.caption(f"🔤 embeddings: {cfg.embedding_model}")
 
     with st.expander("Retrieval settings"):
-        top_k = st.slider("evidence chunks sent to the LLM", 1, 20,
-                          cfg.max_context_chunks)
+        strictness = st.radio(
+            "Retrieval strictness",
+            MODES,
+            index=MODES.index(DEFAULT_MODE),
+            format_func=str.capitalize,
+            help="How much evidence to gather before answering. This changes "
+                 "candidate depth only — it is not a confidence threshold, and "
+                 "it never relaxes the grounding rules.",
+        )
+        profile = profile_for(strictness, cfg)
+        st.caption(profile.description)
+        st.caption(
+            f"↳ fuses {profile.rrf_candidates} candidates · reranks "
+            f"{profile.rerank_candidates} · sends {profile.evidence_chunks} "
+            f"chunks to the model"
+        )
+        if strictness == "permissive":
+            st.caption(
+                "⚠️ More evidence reaches the model, but it still answers only "
+                "from what an excerpt explicitly states. It will not read a "
+                "password out of a nearby handle, address, code or link."
+            )
         rerank = st.checkbox(
             "cross-encoder reranking", value=True,
             help="Reorders candidates by reading query and chunk together. "
@@ -181,8 +205,8 @@ with st.sidebar:
             "Retrieval: vector + BM25 → RRF"
             + (" → cross-encoder" if rerank else "")
             + ". Whether to answer is decided by the grounded prompt, not by a "
-              "score threshold — retrieval scores are not comparable across "
-              "stages, so there is no slider for it."
+              "score threshold — the four stages produce four incomparable "
+              "score scales, so there is no slider for it."
         )
 
 
@@ -226,10 +250,10 @@ if submitted and question.strip():
     has_filters = any(v is not None for v in filters.as_kwargs().values())
     try:
         with st.spinner("Loading retrieval stack…" if rerank else "Preparing…"):
-            answerer = get_answerer(pipe, rerank)
+            answerer = get_answerer(pipe, rerank, strictness)
         with st.spinner("Retrieving and answering…"):
             ans = answerer.answer(
-                question, filters=filters if has_filters else None, k=top_k
+                question, filters=filters if has_filters else None
             )
     except LLMError as e:
         st.error(friendly_llm_error(e))
@@ -249,7 +273,8 @@ if submitted and question.strip():
         )
     else:
         st.markdown(f"### Answer\n{ans.text}")
-        st.caption(f"model: {ans.llm_model} · {len(ans.citations)} citation(s)")
+        st.caption(f"model: {ans.llm_model} · {len(ans.citations)} citation(s) "
+                   f"· {strictness} retrieval")
 
     if ans.citations:
         st.markdown("#### Sources")

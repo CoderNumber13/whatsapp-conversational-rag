@@ -56,6 +56,11 @@ without exposing anyone's private conversations.
 - **The Streamlit demo now runs the stack the experiments measured.** It
   previously ran vector-only, so the demo and the evidence disagreed.
 - Production OpenMP mitigation, in one documented place (`src/runtime.py`).
+- **Retrieval strictness** (Strict / Balanced / Permissive) in the demo: a
+  per-question control over how much evidence is gathered. It moves candidate
+  depth only — never a score threshold — and Permissive is the first
+  configuration that gets the credential evidence in front of the model
+  (X1 rank 14, X2 8, X3 13) while still refusing to state it.
 
 ### Remaining
 
@@ -74,6 +79,11 @@ Dense retrieval, BM25, RRF and a cross-encoder each fail on it independently,
 and RRF and the cross-encoder each rank it *lower* than vector search alone did.
 There is no evidence in the corpus to rank on. **Treated as a permanent
 limitation of retrieval, not something to tune around.**
+
+Permissive mode (experiment 7) now puts the credential chunk *in the model's
+context*, and the model still refuses — which is the correct outcome, because
+nothing in the conversation says the token is a password. Retrieval reach and
+answerability are different problems; only the first was ever fixable here.
 
 What *is* fixed is the consequence: the system now **refuses instead of
 fabricating**. X1/X2/X3 abstain, and none states the credential. Earlier, at a
@@ -117,10 +127,11 @@ them as abstentions.
 | Conversation-aware chunking | **DONE** | `src/chunking/` (`fixed_count`, `time_window`) |
 | Metadata filtering | **DONE** | `RetrievalFilters` in `src/retrieval/retriever.py` |
 | Conversation-context reconstruction | **DONE** | `CONTEXT_WINDOW_MESSAGES` |
+| Keyword / BM25 search | **DONE** | `src/retrieval/keyword_search.py` |
+| Hybrid retrieval (RRF fusion) | **DONE** | `src/retrieval/hybrid_search.py` |
+| Reranking layer | **DONE** | `src/retrieval/reranker.py` |
+| Retrieval strictness control | **DONE** | `src/pipeline/strictness.py` |
 | Semantic chunker (3rd strategy) | **TODO** | `src/chunking/semantic_chunker.py` |
-| Keyword / BM25 search | **TODO** | `src/retrieval/keyword_search.py` |
-| Hybrid retrieval (fuse vector + keyword + metadata) | **TODO** | `src/retrieval/hybrid_search.py` |
-| Reranking layer | **TODO** | `src/retrieval/reranker.py` |
 
 Hybrid retrieval matters because vector search alone is weak on names, exact
 dates, project names, company names, and specific phrases.
