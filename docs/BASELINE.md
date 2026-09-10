@@ -848,6 +848,112 @@ evidence for the decision not to add a threshold.
 
 Completing the full 44 needs a paid tier, or three runs across three days.
 
+## Experiment 7 — retrieval strictness (Strict / Balanced / Permissive)
+
+Measured **2026-09-10**, `large` scale, same 44 questions.
+`python scripts/strictness_benchmark.py [--e2e]`
+
+A user-facing control for "look harder", for questions about credentials, rare
+names and codes where the right chunk ranks poorly. It moves **candidate depth**
+— counts of chunks — and never a score. The four stages produce four
+incomparable scales (cosine, BM25 sums, RRF fusion values, cross-encoder
+logits), so a single numeric confidence knob would be meaningless; experiments 5
+and 6 showed no cross-encoder threshold is calibrated enough to gate on either.
+
+| mode | RRF pool | reranked | evidence → LLM |
+|---|---|---|---|
+| Strict | 50 | 20 | 3 |
+| **Balanced (default)** | **50** | **20** | **5** |
+| Permissive | **10** | 10 | 15 |
+
+Balanced is derived from the live config, so it *is* the production default by
+construction rather than a copy that can drift.
+
+### Retrieval (all 44 questions, no LLM)
+
+| mode | R@1 | R@3 | R@5 | R@10 | MRR | exact | X1 | X2 | X3 | latency |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Strict | 68.4% | 86.8% | 92.1% | 92.1% | 0.785 | 57.1% | – | – | – | 597 ms |
+| Balanced | 68.4% | 86.8% | 92.1% | 92.1% | 0.785 | 57.1% | – | – | – | 570 ms |
+| **Permissive** | 68.4% | 86.8% | 92.1% | **94.7%** | **0.792** | 57.1% | **14** | **8** | **13** | **449 ms** |
+
+### Does the credential evidence reach the model?
+
+| mode | evidence chunks | X1 | X2 | X3 |
+|---|---|---|---|---|
+| Strict | 3 | not reached | not reached | not reached |
+| Balanced | 5 | not reached | not reached | not reached |
+| **Permissive** | **15** | **rank 14** | **rank 8** | **rank 13** |
+
+**Permissive is the first configuration that gets the credential evidence in
+front of the model.** X1/X2/X3 were unreachable at every RRF parameterisation
+tested in experiment 3 and at every rerank depth in experiment 4.
+
+### Why Permissive fuses a *shallower* pool
+
+The obvious design — widen every pool — was tried first and **made the credential
+case worse**:
+
+| variant | rrf | rerank | evidence | X1 | X2 | X3 | MRR | ms |
+|---|---|---|---|---|---|---|---|---|
+| balanced (ref) | 50 | 20 | 5 | – | – | – | 0.785 | 577 |
+| wider evidence | 50 | 20 | 15 | – | 12 | – | 0.787 | 585 |
+| deep + wide | 100 | 50 | 15 | – | – | – | 0.785 | 1170 |
+| deep + very wide | 100 | 50 | 30 | 26 | 17 | – | 0.788 | 1170 |
+| max depth | 144 | 144 | 30 | 28 | – | – | 0.786 | 2802 |
+| **very shallow rrf** | **10** | **10** | **15** | **14** | **8** | **13** | **0.792** | **453** |
+
+The cause is experiment 2's agreement-dominance result. RRF scores agreement, so
+a deeper pool supplies *more* chunks that both retrievers return, and every one
+of them outranks a chunk only one retriever can see. The credential chunk is
+precisely that — visible to the dense retriever alone. Deepening the pool buries
+it; shrinking the pool removes its competition.
+
+So permissiveness is **"how much evidence reaches the model"**, and the pool
+depth is set to serve that rather than raised for its own sake. Widening the
+evidence window alone is not enough (row 2 reaches only X2).
+
+### End to end (live LLM, 4 questions × 3 modes)
+
+| mode | grounded acc | correct abstention | fabrication | **credential stated** | ms |
+|---|---|---|---|---|---|
+| Strict | 0/1 | 2/3 ⚠ | **0/3** | **never** | 12197 |
+| Balanced | **1/1** | **3/3** | **0/3** | **never** | 2883 |
+| Permissive | 0/0 | 1/2 | **0/2** | **never** | 11814 |
+
+**The safety result is unambiguous and is the point of the experiment: zero
+fabrications in every mode, and the credential is never stated in any mode —
+including Permissive, where the token is demonstrably in the context.** X1 and
+X3 abstain under all three settings. Permissive changes what the model may
+*read*, never what it may *claim*.
+
+Everything else in that table is too small and too noisy to conclude from:
+
+- **Strict's 2/3 abstention is an artifact**: X3's LLM call failed after retries
+  and was recorded as a failure, not an abstention. The benchmark now prints
+  `!! LLM FAILED` so this cannot be misread again.
+- Permissive's `should_refuse` is 2 rather than 3 because the credential
+  evidence *does* reach the context, moving that question out of the
+  "no evidence retrieved" group. Its abstention there is correct behaviour, and
+  the strict accounting scores it as a miss.
+- Grounded accuracy is n=1 per mode. Under Permissive, D1 answered without
+  stating the gold fact — plausibly context dilution from 15 chunks, but a
+  single observation is an anecdote.
+
+### The default is unchanged
+
+Balanced remains the default. Permissive wins on Recall@10, MRR, latency and
+credential reach, but the end-to-end evidence for it is one question per mode
+with a failed call in it, and the one hint of a downside — dilution at 15 chunks
+— sits exactly where the evidence is thinnest. Changing the shipped default on
+that would be unjustified. Permissive is offered to the user, per question,
+which is where the trade-off belongs.
+
+**Future experiment (not implemented):** run the full 44-question end-to-end
+benchmark across all three modes on a paid tier — 132 calls — to establish
+whether Permissive's context dilution is real, and whether it is worth making
+the default for credential-shaped queries specifically.
+
 ## What this baseline is for
 
 Any Phase 2 change (BM25, hybrid, reranking, semantic chunking) must be measured

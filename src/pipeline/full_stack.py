@@ -37,6 +37,7 @@ from typing import Optional
 
 from src.config import CONFIG, Config
 from src.pipeline.rag_pipeline import Answer, RagPipeline
+from src.pipeline.strictness import DEFAULT_MODE, StrictnessProfile, profile_for
 from src.retrieval.base import ChunkSearcher
 from src.retrieval.retriever import RetrievalFilters, Retriever
 
@@ -45,18 +46,27 @@ NO_RETRIEVAL_GATE = -math.inf
 
 
 def build_searcher(db, config: Config = CONFIG, *, rerank: bool = True,
-                   rerank_depth: Optional[int] = None) -> ChunkSearcher:
-    """vector + BM25 -> RRF -> (optional) cross-encoder."""
+                   rerank_depth: Optional[int] = None,
+                   profile: Optional[StrictnessProfile] = None) -> ChunkSearcher:
+    """vector + BM25 -> RRF -> (optional) cross-encoder.
+
+    ``profile`` sets the candidate depths of the fusion and rerank stages. It
+    changes how much evidence is gathered, never how any stage scores or ranks,
+    and introduces no threshold of any kind.
+    """
     from src.retrieval.hybrid_search import RRFHybridSearch
 
-    searcher: ChunkSearcher = RRFHybridSearch.open(db, config)
+    searcher: ChunkSearcher = RRFHybridSearch.open(
+        db, config, candidates=(profile.rrf_candidates if profile else None))
     if rerank:
         from src.retrieval.reranker import CrossEncoderReranker, RerankedSearch
 
         reranker = CrossEncoderReranker(config=config)
         reranker.warmup()
-        searcher = RerankedSearch(searcher, reranker, config,
-                                  candidates=rerank_depth)
+        depth = rerank_depth
+        if depth is None and profile is not None:
+            depth = profile.rerank_candidates
+        searcher = RerankedSearch(searcher, reranker, config, candidates=depth)
     return searcher
 
 
@@ -76,14 +86,17 @@ class GroundedAnswerer:
         top_n: Optional[int] = None,
         rerank: bool = True,
         rerank_depth: Optional[int] = None,
+        strictness: str = DEFAULT_MODE,
     ) -> None:
         self.pipeline = pipeline
         self.config = pipeline.config
-        self.top_n = top_n or self.config.max_context_chunks
+        self.profile = profile_for(strictness, self.config)
+        # an explicit top_n still wins; otherwise the profile decides
+        self.top_n = top_n or self.profile.evidence_chunks
         self.pipeline._retriever = Retriever(
             pipeline.db,
             build_searcher(pipeline.db, self.config, rerank=rerank,
-                           rerank_depth=rerank_depth),
+                           rerank_depth=rerank_depth, profile=self.profile),
             self.config,
         )
 

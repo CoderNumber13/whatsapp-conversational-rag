@@ -128,6 +128,24 @@ It deliberately passes **no score floor**: `MIN_RETRIEVAL_SCORE` is a cosine
 threshold and the stack's final scores are cross-encoder logits. Abstention is
 decided by the grounded prompt instead. See `docs/BASELINE.md` for why.
 
+### Retrieval strictness
+
+The sidebar offers **Strict / Balanced / Permissive**. It adjusts *candidate
+depth* — how many chunks are fused, reranked and handed to the model — and is
+deliberately **not** a confidence threshold: the four stages produce four
+incomparable score scales.
+
+```python
+answerer = GroundedAnswerer(RagPipeline(), strictness="permissive")
+```
+
+Use **Permissive** for credentials, rare names and codes, where the right chunk
+ranks poorly. It is the only setting that gets the credential evidence into the
+model's context — and the model still refuses to call an unlabelled token a
+password, because permissiveness changes what it may *read*, never what it may
+*claim*. **Balanced is the default** and the configuration every published
+benchmark number was measured with.
+
 ## Project layout
 
 ```
@@ -142,13 +160,14 @@ src/
   llm/         base.py · factory.py · gemini_client.py · ollama_client.py
                openai_client.py · mock.py · prompts.py
   pipeline/    rag_pipeline.py · full_stack.py (the assembled stack)
+               strictness.py (Strict/Balanced/Permissive depths)
   evaluation/  dataset.py · corpus.py · metrics.py · runner.py · sweep.py
                calibration.py · margins.py · end_to_end.py
   runtime.py                           ← FAISS/torch OpenMP guard
   graph/ query/ agent/                 ← Phase 3+ (scaffolded)
 app.py                                 ← Streamlit UI
 scripts/generate_synthetic_chats.py
-tests/                                 ← 353 tests
+tests/                                 ← 390 tests
 ```
 
 ## Pipeline
