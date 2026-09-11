@@ -48,8 +48,17 @@ cp .env.example .env        # then edit ME_NAMES to your WhatsApp display name(s
 pytest
 
 # 4. run the app
-streamlit run app.py
+streamlit run app.py        # or, from cmd, just:  run_app.bat
 ```
+
+**On Windows, prefer `run_app.bat`.** Anaconda's base environment has
+`streamlit` but not `faiss`, so a plain `streamlit run app.py` without
+activating `convmem` starts the app and then fails at ingestion with
+`ModuleNotFoundError: No module named 'faiss'`. Base is Python 3.14, which has
+no faiss wheel, so installing it there is not an option. The launcher names the
+environment's interpreter directly, so there is nothing to remember; the app
+also preflights at startup and tells you which interpreter it is running under
+if a required package is missing.
 
 > **Always activate `convmem` first.** The system Anaconda base is Python 3.14,
 > which has no `faiss` wheel — ingestion fails with `ModuleNotFoundError: faiss`.

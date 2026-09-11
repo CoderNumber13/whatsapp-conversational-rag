@@ -229,3 +229,53 @@ def test_app_does_not_rebuild_the_index_on_every_run():
 
 def test_app_handles_an_empty_corpus_before_asking():
     assert "count_chunks() == 0" in APP
+
+
+# --- launching under the wrong interpreter ----------------------------
+# Anaconda base has streamlit but not faiss, so `streamlit run app.py` without
+# activating convmem starts fine and dies at ingestion. Both the launcher and
+# the preflight exist to make that impossible to hit silently.
+
+def test_preflight_detects_a_missing_native_runtime():
+    from src.preflight import missing_runtimes
+
+    assert missing_runtimes({"faiss": False, "torch": True}) == ["faiss"]
+    assert missing_runtimes({"faiss": True, "torch": True}) == []
+    assert missing_runtimes({}) == ["faiss"]
+
+
+def test_preflight_ignores_runtimes_it_does_not_require():
+    """torch missing is survivable (mock embedder); faiss is not."""
+    from src.preflight import missing_runtimes
+
+    assert missing_runtimes({"faiss": True, "torch": False}) == []
+
+
+def test_preflight_message_names_the_interpreter_and_the_fix():
+    import sys
+
+    from src.preflight import LAUNCHER, wrong_environment_message
+
+    err, fix = wrong_environment_message(["faiss"])
+    assert sys.executable in err, "must say which python is running"
+    assert "faiss" in err and "base" in err.lower()
+    assert "no faiss wheel" in err, "must rule out 'just pip install it'"
+    assert LAUNCHER in fix and "streamlit run app.py" in fix
+
+
+def test_app_preflights_before_touching_the_pipeline():
+    app = (REPO / "app.py").read_text(encoding="utf-8")
+    stop_at = app.index("st.stop()")
+    assert app.index("missing_runtimes") < stop_at
+    assert stop_at < app.index("get_pipeline()"), (
+        "the preflight must run before the pipeline is built"
+    )
+
+
+def test_launcher_pins_the_environment_interpreter():
+    bat = (REPO / "run_app.bat").read_text(encoding="utf-8")
+    assert "convmem" in bat
+    assert "-m streamlit run app.py" in bat, "must launch via the pinned python"
+    assert "cd /d" in bat, "project and Anaconda can sit on different drives"
+    assert "CONVMEM_PYTHON" in bat, "must be overridable on another machine"
+    assert "import faiss, torch, streamlit" in bat, "must verify before launching"

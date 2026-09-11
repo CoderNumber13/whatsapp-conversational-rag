@@ -14,7 +14,7 @@ from __future__ import annotations
 # src/runtime.py for the evidence and the proper environment-level fix.
 from src.runtime import init_native_runtimes  # isort:skip
 
-init_native_runtimes()  # noqa: E402
+_RUNTIMES = init_native_runtimes()  # noqa: E402
 
 from datetime import datetime, time  # noqa: E402
 from pathlib import Path  # noqa: E402
@@ -26,6 +26,9 @@ from src.config import Config  # noqa: E402
 from src.llm.base import LLMError  # noqa: E402
 from src.pipeline.full_stack import GroundedAnswerer  # noqa: E402
 from src.pipeline.rag_pipeline import RagPipeline  # noqa: E402
+from src.preflight import (  # noqa: E402
+    missing_runtimes, wrong_environment_message,
+)
 from src.pipeline.strictness import (  # noqa: E402
     DEFAULT_MODE, MODES, profile_for,
 )
@@ -34,6 +37,18 @@ from src.retrieval.retriever import RetrievalFilters  # noqa: E402
 SAMPLE_DIR = Path(__file__).parent / "data" / "sample" / "synthetic_chats"
 
 st.set_page_config(page_title="Conversation Memory", page_icon="💬", layout="wide")
+
+
+# --- preflight ------------------------------------------------------
+# Launching from Anaconda base starts the app and then fails at ingestion,
+# because base has streamlit but not faiss. Fail here instead, naming the
+# interpreter, rather than after the user has uploaded a file.
+_MISSING = missing_runtimes(_RUNTIMES['runtimes'])
+if _MISSING:
+    _err, _fix = wrong_environment_message(_MISSING)
+    st.error(_err)
+    st.markdown(_fix)
+    st.stop()
 
 
 # --- resources ------------------------------------------------------
