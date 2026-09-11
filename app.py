@@ -173,7 +173,9 @@ with st.sidebar:
     st.caption(("🟢 " if ok else "🔴 ") + msg)
     st.caption(f"🔤 embeddings: {cfg.embedding_model}")
 
-    with st.expander("Retrieval settings"):
+    # expanded: the strictness control is a headline feature of the demo,
+    # so it should be visible on load rather than one click away
+    with st.expander("Retrieval settings", expanded=True):
         strictness = st.radio(
             "Retrieval strictness",
             MODES,
