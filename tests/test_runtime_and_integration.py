@@ -214,10 +214,20 @@ def test_app_uses_the_full_measured_retrieval_stack():
 
 
 def test_app_reports_missing_api_keys_and_provider_failures():
+    """Provider-error wording now lives in src/llm/errors.py so it can be unit
+    tested without Streamlit; the app must still surface it."""
+    from src.llm.base import LLMError
+    from src.llm.errors import friendly_message
+
     assert "GEMINI_API_KEY not set" in APP
-    assert "friendly_llm_error" in APP and "LLMError" in APP
-    for signal in ("429", "503", "404"):
-        assert signal in APP, f"no user-facing handling for HTTP {signal}"
+    assert "friendly_message" in APP and "LLMError" in APP
+
+    for signal, expect in (("429", "quota"), ("503", "overloaded"),
+                           ("404", "GEMINI_MODEL")):
+        msg = friendly_message(LLMError(f"Gemini HTTP {signal}: something"))
+        assert expect.lower() in msg.lower(), (
+            f"no actionable message for HTTP {signal}"
+        )
 
 
 def test_app_does_not_rebuild_the_index_on_every_run():

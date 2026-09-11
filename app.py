@@ -24,6 +24,7 @@ import streamlit as st  # noqa: E402
 
 from src.config import Config  # noqa: E402
 from src.llm.base import LLMError  # noqa: E402
+from src.llm.errors import friendly_message, is_transient  # noqa: E402
 from src.pipeline.full_stack import GroundedAnswerer  # noqa: E402
 from src.pipeline.rag_pipeline import RagPipeline  # noqa: E402
 from src.preflight import (  # noqa: E402
@@ -99,21 +100,25 @@ def llm_status(cfg: Config) -> tuple[bool, str]:
     return False, f"unknown provider {cfg.llm_provider!r}"
 
 
-def friendly_llm_error(exc: Exception) -> str:
-    """Turn provider failures into something a demo audience can act on."""
-    text = str(exc)
-    if "429" in text or "RESOURCE_EXHAUSTED" in text:
-        return ("The model's request quota is exhausted. Free Gemini tiers allow "
-                "only a handful of requests per day per model — wait, switch "
-                "GEMINI_MODEL in .env, or use a paid key.")
-    if "503" in text or "UNAVAILABLE" in text:
-        return "The model is temporarily overloaded. Try again in a moment."
-    if "404" in text or "NOT_FOUND" in text:
-        return ("That model name is not available to this API key. Update "
-                "GEMINI_MODEL in .env (see README for how to list valid names).")
-    if "not set" in text.lower() or "api_key" in text.lower():
-        return "No API key configured. Set GEMINI_API_KEY in .env and restart."
-    return text
+def answer_with_retry(answerer, question, filters, attempts: int = 3):
+    """Retry a transient provider failure; surface a permanent one immediately.
+
+    Hosted models return brief 503s under load, and losing an answer to one
+    mid-demo is avoidable. Quota and auth errors are NOT retried: they cannot
+    clear within the run, so retrying only makes the app look hung.
+    """
+    import time
+
+    for attempt in range(1, attempts + 1):
+        try:
+            return answerer.answer(question, filters=filters)
+        except LLMError as exc:
+            if attempt == attempts or not is_transient(exc):
+                raise
+            st.info(
+                f"Model busy — retrying ({attempt}/{attempts - 1})…"
+            )
+            time.sleep(2 ** attempt)
 
 
 pipe = get_pipeline()
@@ -269,11 +274,11 @@ if submitted and question.strip():
         with st.spinner("Loading retrieval stack…" if rerank else "Preparing…"):
             answerer = get_answerer(pipe, rerank, strictness)
         with st.spinner("Retrieving and answering…"):
-            ans = answerer.answer(
-                question, filters=filters if has_filters else None
+            ans = answer_with_retry(
+                answerer, question, filters if has_filters else None
             )
     except LLMError as e:
-        st.error(friendly_llm_error(e))
+        st.error(friendly_message(e))
         st.stop()
     except Exception as e:
         st.error(f"{type(e).__name__}: {e}")
