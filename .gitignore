@@ -4,7 +4,13 @@
 # ---------------------------------------------------------------------------
 data/private/
 data/**/private/
-/data/*.txt          # loose exports dropped into data/ root
+
+# Loose WhatsApp exports, ANYWHERE in the tree. Previously only /data/*.txt was
+# ignored, so an export dropped in the repo root was caught by `git add -A`.
+# Default-deny with an explicit allow for the tracked synthetic set.
+*.txt
+!data/sample/**/*.txt
+!requirements*.txt
 
 # Reference PDFs / papers kept locally, not committed (may carry third-party PII)
 *.pdf
