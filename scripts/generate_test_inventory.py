@@ -1,0 +1,175 @@
+"""Generate docs/TESTS.md — an inventory of every automated test.
+
+    python scripts/generate_test_inventory.py
+    python scripts/generate_test_inventory.py --check    # CI: fail if stale
+
+Written as a generator rather than a hand-maintained document because the
+hand-maintained numbers already drifted once: the README claimed 390 tests when
+there were 410. Anything counted by hand goes stale; this is regenerated from
+pytest's own collection plus the source docstrings.
+
+Parametrised cases are grouped under their test function, so the document reads
+as "what is guaranteed" rather than as an expansion of every parameter value.
+"""
+
+from __future__ import annotations
+
+import argparse
+import ast
+import re
+import subprocess
+import sys
+from collections import OrderedDict
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parents[1]
+OUT = REPO / "docs" / "TESTS.md"
+
+# Short, human descriptions of what each module is responsible for. A module
+# missing from here still appears; it just gets no blurb.
+MODULE_BLURBS = {
+    "test_whatsapp_parser": "Export parsing: both WhatsApp formats, multiline "
+                            "messages, date-order inference, media, system lines.",
+    "test_normalizer": "Identity resolution, stable message ids, ordering, dedup.",
+    "test_database": "SQLite as the source of truth; queries the retriever relies on.",
+    "test_storage_reindex": "Re-import safety: ids stay stable, chunks re-embed only when changed.",
+    "test_chunking": "Conversation-aware chunking and chunk/DB synchronisation.",
+    "test_embeddings": "Embedding interface and the mock embedder used throughout the suite.",
+    "test_vector_index": "FAISS store, incremental indexing, and what actually gets embedded.",
+    "test_keyword_search": "BM25 lexical retrieval: tokenisation, indexing, determinism.",
+    "test_hybrid_search": "Reciprocal Rank Fusion: fusion maths, ties, provenance.",
+    "test_reranker": "Cross-encoder reranking stage and its contract.",
+    "test_retriever": "Metadata filtering, candidate selection, context reconstruction.",
+    "test_strictness": "Strict/Balanced/Permissive depths and the guarantees they must not break.",
+    "test_llm": "LLM provider clients and the grounded prompt.",
+    "test_llm_errors": "Which provider failures are retried and what the user is told.",
+    "test_pipeline": "End-to-end answering: citations, refusal, no fabrication.",
+    "test_end_to_end": "Grounded-answering contract and the end-to-end metrics.",
+    "test_evaluation": "Benchmark harness: metric maths and dataset integrity.",
+    "test_calibration": "Abstention-threshold calibration maths.",
+    "test_margins": "Margin-based abstention signals.",
+    "test_runtime_and_integration": "OpenMP guard, launcher, and Streamlit wiring regressions.",
+    "test_synthetic_end_to_end": "The synthetic corpus answered end to end.",
+    "test_app_smoke": "The Streamlit app boots and can answer.",
+}
+
+
+def collect() -> list[str]:
+    """Every test node id, from pytest itself."""
+    proc = subprocess.run(
+        [sys.executable, "-m", "pytest", "-o", "addopts=", "--collect-only", "-q"],
+        cwd=REPO, capture_output=True, text=True, errors="replace", timeout=1800,
+    )
+    ids = [ln.strip() for ln in proc.stdout.splitlines() if "::" in ln]
+    if not ids:
+        raise SystemExit(f"collection produced nothing:\n{proc.stdout[-2000:]}"
+                         f"\n{proc.stderr[-2000:]}")
+    return ids
+
+
+def docstrings_for(path: Path) -> dict[str, str]:
+    """First docstring line of every test function in a module."""
+    out: dict[str, str] = {}
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+    except (OSError, SyntaxError):
+        return out
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) \
+                and node.name.startswith("test"):
+            doc = ast.get_docstring(node) or ""
+            first = doc.strip().split("\n\n")[0].replace("\n", " ").strip()
+            out[node.name] = " ".join(first.split())
+    return out
+
+
+def humanise(name: str) -> str:
+    text = re.sub(r"^test_", "", name).replace("_", " ")
+    return text[:1].upper() + text[1:] if text else name
+
+
+def build() -> str:
+    ids = collect()
+
+    # module -> function -> number of parametrised cases
+    modules: OrderedDict[str, OrderedDict[str, int]] = OrderedDict()
+    for node in ids:
+        file_part, _, test_part = node.partition("::")
+        func = test_part.split("[")[0]
+        modules.setdefault(file_part, OrderedDict()).setdefault(func, 0)
+        modules[file_part][func] += 1
+
+    total_cases = len(ids)
+    total_funcs = sum(len(f) for f in modules.values())
+
+    lines = [
+        "# Automated test inventory",
+        "",
+        f"**{total_cases} test cases** across **{total_funcs} test functions** in "
+        f"**{len(modules)} modules**.",
+        "",
+        "Generated by `python scripts/generate_test_inventory.py` — do not edit by "
+        "hand. Regenerate after adding tests; `--check` fails if this file is out "
+        "of date.",
+        "",
+        "The whole suite runs with a **mock embedder and mock LLM**, so it needs no "
+        "API key, no network and no model download. A fresh clone can run it "
+        "immediately:",
+        "",
+        "```bash",
+        "pytest",
+        "```",
+        "",
+        "Counts below are *cases*: a parametrised function contributing several "
+        "cases is listed once, with its case count.",
+        "",
+        "## Summary",
+        "",
+        "| Module | Cases | Covers |",
+        "|---|---:|---|",
+    ]
+    for mod, funcs in modules.items():
+        stem = Path(mod).stem
+        lines.append(f"| [`{mod}`](../{mod}) | {sum(funcs.values())} | "
+                     f"{MODULE_BLURBS.get(stem, '')} |")
+
+    lines += ["", "## Tests by module", ""]
+    for mod, funcs in modules.items():
+        stem = Path(mod).stem
+        lines += [f"### `{mod}`", ""]
+        if MODULE_BLURBS.get(stem):
+            lines += [f"*{MODULE_BLURBS[stem]}*", ""]
+        docs = docstrings_for(REPO / mod)
+        for func, count in funcs.items():
+            suffix = f" _({count} cases)_" if count > 1 else ""
+            doc = docs.get(func, "")
+            lines.append(f"- **{humanise(func)}**{suffix}"
+                         + (f" — {doc}" if doc else ""))
+        lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--check", action="store_true",
+                    help="exit non-zero if docs/TESTS.md is out of date")
+    args = ap.parse_args()
+
+    content = build()
+    if args.check:
+        current = OUT.read_text(encoding="utf-8") if OUT.exists() else ""
+        if current != content:
+            print(f"{OUT.relative_to(REPO)} is out of date — regenerate with:\n"
+                  "  python scripts/generate_test_inventory.py")
+            return 1
+        print(f"{OUT.relative_to(REPO)} is up to date")
+        return 0
+
+    OUT.parent.mkdir(parents=True, exist_ok=True)
+    OUT.write_text(content, encoding="utf-8")
+    print(f"wrote {OUT.relative_to(REPO)}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
