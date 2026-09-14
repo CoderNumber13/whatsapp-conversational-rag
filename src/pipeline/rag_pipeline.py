@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass, field
+from enum import Enum
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Sequence
@@ -60,6 +61,30 @@ class Citation:
     src_line_end: int
 
 
+class AnswerStatus(str, Enum):
+    """Why an answer looks the way it does.
+
+    ``supported`` alone cannot distinguish the two ways an answer arrives with
+    no usable citation, and they mean opposite things to a user:
+
+    * the model said it could not answer            -> REFUSED
+    * the model answered but omitted citations      -> UNCITED
+    * the model cited sources that do not exist     -> INVALID_CITATIONS
+
+    UNCITED matters because smaller local models (llama3.1:8b) follow the
+    ``[m:<id>]`` format inconsistently, dropping it on short summary answers
+    while keeping it on specific factual ones. Rendering that as "I couldn't
+    find anything" tells the user the system has no information, when in fact it
+    answered correctly and merely failed to attribute. The answer is still not
+    *grounded* -- nothing here relaxes that -- but it is not a refusal either.
+    """
+
+    GROUNDED = "grounded"
+    UNCITED = "uncited"
+    INVALID_CITATIONS = "invalid_citations"
+    REFUSED = "refused"
+
+
 @dataclass
 class Answer:
     text: str
@@ -68,7 +93,20 @@ class Answer:
     retrieved: list[RetrievedChunk]
     llm_model: str
     top_score: float
+    # True only when the retrieval gate fired and the LLM was never consulted.
+    # Deliberately NOT set for a model-emitted refusal; see AnswerStatus.
     abstained: bool = False
+    status: AnswerStatus = AnswerStatus.REFUSED
+
+    @property
+    def is_refusal(self) -> bool:
+        return self.status is AnswerStatus.REFUSED
+
+    @property
+    def needs_caution(self) -> bool:
+        """An answer was produced that the pipeline could not verify."""
+        return self.status in (AnswerStatus.UNCITED,
+                               AnswerStatus.INVALID_CITATIONS)
 
 
 class RagPipeline:
@@ -139,6 +177,7 @@ class RagPipeline:
                 llm_model="(none)",
                 top_score=top,
                 abstained=True,
+                status=AnswerStatus.REFUSED,
             )
 
         # Only the strongest chunks go to the LLM — and only as many as fit the
@@ -157,9 +196,20 @@ class RagPipeline:
                 retrieved=retrieved,
                 llm_model=resp.model,
                 top_score=top,
+                status=AnswerStatus.REFUSED,
             )
 
+        # Distinguish "never cited" from "cited something that does not exist".
+        # The first is a formatting lapse; the second is a fabrication signal.
+        emitted = _CITE_RE.findall(resp.text)
         citations = self._collect_citations(resp.text, valid_ids)
+        if citations:
+            status = AnswerStatus.GROUNDED
+        elif emitted:
+            status = AnswerStatus.INVALID_CITATIONS
+        else:
+            status = AnswerStatus.UNCITED
+
         return Answer(
             text=resp.text.strip(),
             supported=bool(citations),
@@ -167,6 +217,7 @@ class RagPipeline:
             retrieved=retrieved,
             llm_model=resp.model,
             top_score=top,
+            status=status,
         )
 
     # --- helpers -------------------------------------------------

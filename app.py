@@ -26,7 +26,7 @@ from src.config import Config  # noqa: E402
 from src.llm.base import LLMError  # noqa: E402
 from src.llm.errors import friendly_message, is_transient  # noqa: E402
 from src.pipeline.full_stack import GroundedAnswerer  # noqa: E402
-from src.pipeline.rag_pipeline import RagPipeline  # noqa: E402
+from src.pipeline.rag_pipeline import AnswerStatus, RagPipeline  # noqa: E402
 from src.preflight import (  # noqa: E402
     missing_runtimes, wrong_environment_message,
 )
@@ -284,14 +284,32 @@ if submitted and question.strip():
         st.error(f"{type(e).__name__}: {e}")
         st.stop()
 
-    if not ans.supported:
-        # Either the model emitted NOT_FOUND, or every citation it produced was
-        # invented and therefore dropped. Both mean: not grounded, so don't
-        # present it as an answer.
+    # Three outcomes that used to look identical. "The model refused" and "the
+    # model answered but did not attribute it" are opposite messages to a user,
+    # and collapsing them made a correct answer read as "no data found".
+    if ans.status is AnswerStatus.REFUSED:
         st.warning(ans.text)
         st.caption(
             "The system refuses rather than guessing when the retrieved "
             "conversations don't support an answer."
+        )
+    elif ans.status is AnswerStatus.UNCITED:
+        st.markdown("### Answer\n" + ans.text)
+        st.warning(
+            "The model answered, but did not provide source citations. "
+            "Treat this answer with caution - check the retrieved messages "
+            "below to confirm it."
+        )
+        st.caption(f"model: {ans.llm_model} - 0 citations - {strictness} retrieval")
+    elif ans.status is AnswerStatus.INVALID_CITATIONS:
+        st.markdown("### Answer\n" + ans.text)
+        st.error(
+            "The model cited sources that do not exist in the retrieved "
+            "conversations, so every citation was discarded. Treat this answer "
+            "as unverified."
+        )
+        st.caption(
+            f"model: {ans.llm_model} - 0 valid citations - {strictness} retrieval"
         )
     else:
         st.markdown(f"### Answer\n{ans.text}")
@@ -308,7 +326,10 @@ if submitted and question.strip():
                 unsafe_allow_html=True,
             )
 
-    with st.expander(f"Retrieval inspection — {len(ans.retrieved)} chunk(s)"):
+    # auto-expand when the answer could not be verified, so the user can
+    # check it against the source messages without hunting for the panel
+    with st.expander(f"Retrieval inspection — {len(ans.retrieved)} chunk(s)",
+                     expanded=ans.needs_caution):
         st.caption(
             "Scores come from the last retrieval stage and are only comparable "
             "within this list: cosine for vector-only, an RRF fusion value, or a "

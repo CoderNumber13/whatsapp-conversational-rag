@@ -45,7 +45,7 @@ pip install -r requirements.txt
 cp .env.example .env        # then edit ME_NAMES to your WhatsApp display name(s)
 
 # 3. tests  (uses a mock embedder + mock LLM — no model or API key needed)
-pytest                      # 410 tests; full inventory in docs/TESTS.md
+pytest                      # 445 tests; full inventory in docs/TESTS.md
 
 # 4. run the app
 streamlit run app.py        # or, from cmd, just:  run_app.bat
@@ -176,7 +176,7 @@ src/
   graph/ query/ agent/                 ← Phase 3+ (scaffolded)
 app.py                                 ← Streamlit UI
 scripts/generate_synthetic_chats.py
-tests/                                 ← 410 tests (see docs/TESTS.md)
+tests/                                 ← 445 tests (see docs/TESTS.md)
 ```
 
 ## Pipeline
