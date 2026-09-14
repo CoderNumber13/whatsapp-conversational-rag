@@ -7,6 +7,7 @@ literal token ``NOT_FOUND`` when the excerpts don't contain the answer.
 
 from __future__ import annotations
 
+import re
 from typing import Iterable
 
 from src.storage.models import Message
@@ -14,12 +15,36 @@ from src.storage.models import Message
 NOT_FOUND_TOKEN = "NOT_FOUND"
 
 
+# The sentinel the prompt asks for, allowing NOT_FOUND / NOTFOUND but NOT the
+# spaced prose form: an answer may legitimately contain 'not found'
+# ("the parcel was not found"), and that is content, not a refusal.
+_NOT_FOUND_SENTINEL_RE = re.compile(r"\bNOT_?FOUND\b", re.IGNORECASE)
+
+# A refusal wrapped in a sentence is still a refusal, but a long answer that
+# merely mentions the phrase is not. Smaller local models often reply
+# "The final answer is NOT_FOUND." instead of the bare token; treating that as
+# an answer would surface the raw sentinel to the user as if it were content.
+_MAX_REFUSAL_CHARS = 120
+
+
 def is_not_found(text: str) -> bool:
-    """True if the model's reply is a 'not found' signal, tolerating spacing /
-    punctuation / casing variants ('NOTFOUND', 'not found.', 'NOT_FOUND')."""
-    squashed = "".join(ch for ch in text.upper() if ch.isalnum())
-    return squashed in {"NOTFOUND", "NOTFOUNDINCHATS"} or (
-        len(text.strip()) <= 40 and squashed.startswith("NOTFOUND")
+    """True if the model's reply is a 'not found' signal.
+
+    Tolerates spacing, punctuation and casing ('NOTFOUND', 'not found.',
+    'NOT_FOUND'), and the token embedded in a short sentence. A reply that
+    cites a source is never a refusal, however it is phrased.
+    """
+    stripped = text.strip()
+    squashed = "".join(ch for ch in stripped.upper() if ch.isalnum())
+    if squashed in {"NOTFOUND", "NOTFOUNDINCHATS"}:
+        return True
+    if len(stripped) <= 40 and squashed.startswith("NOTFOUND"):
+        return True
+    # e.g. "The final answer is NOT_FOUND." -- a refusal the model dressed up.
+    return (
+        len(stripped) <= _MAX_REFUSAL_CHARS
+        and bool(_NOT_FOUND_SENTINEL_RE.search(stripped))
+        and "[m:" not in stripped
     )
 
 
