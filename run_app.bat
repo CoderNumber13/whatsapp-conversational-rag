@@ -14,7 +14,22 @@ setlocal
 
 REM Override by setting CONVMEM_PYTHON before calling, e.g. for a different
 REM machine or a renamed environment.
-if "%CONVMEM_PYTHON%"=="" set "CONVMEM_PYTHON=D:\anaconda3\envs\convmem\python.exe"
+REM Find the environment's interpreter. Order: an explicit override, then
+REM conda's own resolution, then the common install locations. Nothing is
+REM hardcoded to one machine's drive letter.
+if not "%CONVMEM_PYTHON%"=="" goto :have_python
+
+for /f "delims=" %%i in ('conda run -n convmem python -c "import sys;print(sys.executable)" 2^>nul') do set "CONVMEM_PYTHON=%%i"
+if not "%CONVMEM_PYTHON%"=="" goto :have_python
+
+for %%R in ("%CONDA_PREFIX%\..\.." "%USERPROFILE%\anaconda3" "%USERPROFILE%\miniconda3" "%USERPROFILE%\Miniforge3" "C:\ProgramData\anaconda3" "D:\anaconda3") do (
+    if exist "%%~R\envs\convmem\python.exe" (
+        set "CONVMEM_PYTHON=%%~R\envs\convmem\python.exe"
+        goto :have_python
+    )
+)
+
+:have_python
 
 if not exist "%CONVMEM_PYTHON%" (
     echo.
@@ -28,6 +43,8 @@ if not exist "%CONVMEM_PYTHON%" (
     echo.
     echo   Or point this script at an existing one:
     echo     set CONVMEM_PYTHON=C:\path\to\env\python.exe
+    echo.
+    echo   (searched: CONVMEM_PYTHON, conda run, and the usual install paths)
     echo.
     exit /b 1
 )

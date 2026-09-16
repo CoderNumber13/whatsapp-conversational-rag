@@ -19,8 +19,7 @@ from src.evaluation.corpus import generate_large_corpus
 from src.evaluation.dataset import QUESTIONS, EvalQuestion, build_corpus, resolve_expectations
 from src.evaluation.metrics import QuestionResult, Summary, by_category, summarize
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-SAMPLE_DIR = REPO_ROOT / "data" / "sample" / "synthetic_chats"
+from src.evaluation.samples import REPO_ROOT, SAMPLE_DIR  # noqa: F401
 
 PROBE_K = 10  # deepest K we report Recall for
 

@@ -38,12 +38,12 @@ def wrong_environment_message(missing: list[str]) -> tuple[str, str]:
     )
     guidance = (
         "**Fix — launch with the project environment instead.** From the "
-        f"project folder:\n\n"
+        "project folder:\n\n"
         f"```\n{LAUNCHER}\n```\n\n"
-        "or, equivalently:\n\n"
+        "or activate the environment first:\n\n"
         "```\n"
-        'cd /d "C:\\Users\\asus\\Documents\\Whatsapp Advanced RAG Project"\n'
-        "D:\\anaconda3\\envs\\convmem\\python.exe -m streamlit run app.py\n"
+        "conda activate convmem\n"
+        "streamlit run app.py\n"
         "```\n\n"
         "If the `convmem` environment does not exist yet, see **Setup** in "
         "`README.md`."

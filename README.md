@@ -18,8 +18,11 @@ the pipeline works on a normalized, source-independent message schema.
 
 ## Privacy
 
-- Real chat data is **never** committed. `data/private/` and loose `.txt` drops
-  are git-ignored; only the synthetic set under `data/sample/` is tracked.
+- Real chat data is **never** committed. `data/private/` and every loose `.txt`
+  are git-ignored. **No chat file of any kind is tracked** — even the synthetic
+  sample set is generated on first use by
+  `scripts/generate_synthetic_chats.py`, so nothing resembling a private
+  conversation ships in the repository.
 - No WhatsApp scraping, no account access — only user-exported `.txt` files.
 - LLM provider is configurable (`gemini` / `ollama` / `openai` / `mock`); no keys
   in source. Only `.env.example` (placeholders) is tracked — `.env` is ignored.
@@ -65,13 +68,15 @@ if a required package is missing.
 
 ### Choosing an LLM
 
-Set `LLM_PROVIDER` in `.env`. **Default: `gemini`** — hosted, no local GPU/RAM
-requirement, and the fastest path to a working demo.
+Set `LLM_PROVIDER` in `.env`. **The default is `ollama`** — fully local, so no
+API key is needed and no conversation leaves your machine. Switch to `gemini`
+for faster answers and more reliable citations, at the cost of sending
+excerpts to Google.
 
 | Provider | Config | Notes |
 |---|---|---|
-| `gemini` | `GEMINI_API_KEY` ([get one](https://aistudio.google.com/apikey)), `GEMINI_MODEL` | Default. Pin an explicit model, not `gemini-flash-latest` — a moving alias can change answers between runs. |
-| `ollama` | `OLLAMA_MODEL`, `OLLAMA_NUM_CTX` | Fully local/offline. See troubleshooting below. |
+| `ollama` | `OLLAMA_MODEL`, `OLLAMA_NUM_CTX` | **Default.** Fully local/offline, no key, no quota. Slower (20-40s on an 8B model) and cites less consistently. |
+| `gemini` | `GEMINI_API_KEY` ([get one](https://aistudio.google.com/apikey)), `GEMINI_MODEL` | Faster and cites reliably. Free tier allows ~20 requests/day per model. Pin an explicit model, not `gemini-flash-latest`. |
 | `openai` | `OPENAI_API_KEY`, `OPENAI_BASE_URL` | Also accepts OpenAI-compatible endpoints. |
 | `mock` | — | Deterministic; used by the test suite. |
 
@@ -175,7 +180,7 @@ src/
   runtime.py                           ← FAISS/torch OpenMP guard
   graph/ query/ agent/                 ← Phase 3+ (scaffolded)
 app.py                                 ← Streamlit UI
-scripts/generate_synthetic_chats.py
+scripts/generate_synthetic_chats.py    <- sample chats (generated, not tracked)
 tests/                                 ← 445 tests (see docs/TESTS.md)
 ```
 

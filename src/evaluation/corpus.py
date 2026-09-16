@@ -216,6 +216,9 @@ def _conversation(
 
 def generate_large_corpus(dest: Path, sample_dir: Path) -> list[Path]:
     """Build the production-scale corpus. Deterministic for a fixed SEED."""
+    from src.evaluation.samples import ensure_sample_corpus
+
+    ensure_sample_corpus(sample_dir)
     rng = random.Random(SEED)
     dest.mkdir(parents=True, exist_ok=True)
     files: list[Path] = []
