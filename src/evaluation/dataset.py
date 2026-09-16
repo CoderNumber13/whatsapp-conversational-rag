@@ -66,8 +66,14 @@ CREDENTIAL_EXPORT = """\
 
 
 def build_corpus(dest: Path, sample_dir: Path) -> list[Path]:
-    """Materialise the benchmark corpus: the tracked synthetic chats plus the
-    credential export. Returns the export paths to ingest."""
+    """Materialise the benchmark corpus: the synthetic chats plus the credential
+    export. Returns the export paths to ingest.
+
+    The sample chats are generated if absent -- they are not tracked in git.
+    """
+    from src.evaluation.samples import ensure_sample_corpus
+
+    ensure_sample_corpus(sample_dir)
     dest.mkdir(parents=True, exist_ok=True)
     files: list[Path] = []
     for src in sorted(sample_dir.glob("*.txt")):

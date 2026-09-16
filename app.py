@@ -35,7 +35,7 @@ from src.pipeline.strictness import (  # noqa: E402
 )
 from src.retrieval.retriever import RetrievalFilters  # noqa: E402
 
-SAMPLE_DIR = Path(__file__).parent / "data" / "sample" / "synthetic_chats"
+from src.evaluation.samples import SAMPLE_DIR, ensure_sample_corpus  # noqa: E402
 
 st.set_page_config(page_title="Conversation Memory", page_icon="💬", layout="wide")
 
@@ -168,7 +168,8 @@ with st.sidebar:
             st.rerun()
 
     if col_b.button("Load sample", use_container_width=True, key="btn_sample"):
-        files = sorted(SAMPLE_DIR.glob("*.txt"))
+        # not tracked in git; generated on first use
+        files = sorted(ensure_sample_corpus(SAMPLE_DIR).glob("*.txt"))
         if not files:
             st.error(f"No sample exports found in {SAMPLE_DIR}")
         else:
