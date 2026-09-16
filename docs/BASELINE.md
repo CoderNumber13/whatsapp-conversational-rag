@@ -15,15 +15,21 @@ deterministically by [`src/evaluation/corpus.py`](../src/evaluation/corpus.py).
 Use **`large`** for any Phase 2 comparison — `sample` is too small to
 discriminate, and it cannot reproduce the credential failure.
 
+> **Note (2026-09-16).** The vector baseline's Recall@3 and MRR were re-measured
+> after the credential conversation's message text was replaced during a git
+> history scrub (real phrasing removed). Recall@1/@5/@10 are unchanged, and the
+> BM25, RRF and cross-encoder numbers are unchanged. Only the dense retriever is
+> sensitive to that wording, because only it embeds the text.
+
 ## Headline: both scales
 
 | Metric | `sample` (7 chunks) | `large` (144 chunks) |
 |---|---|---|
 | Recall@1 | 68.4% | **57.9%** |
-| Recall@3 | 97.4% | **73.7%** |
+| Recall@3 | 97.4% | **71.1%** |
 | Recall@5 | 97.4% *(saturated)* | **76.3%** |
 | Recall@10 | 100% *(saturated)* | **92.1%** |
-| MRR | 0.820 | **0.682** |
+| MRR | 0.820 | **0.677** |
 | Latency (mean) | 14.4 ms | **15.9 ms** |
 | Separation | +0.0779 | **+0.0566** |
 | `exact_term` R@1 | 14.3% | **0.0%** |
@@ -142,7 +148,7 @@ production reason. The top-6 for X1:
 | 2 | 0.2540 | no | **distractor** — "gmail id do", "email pe check kr lo" |
 | 3 | 0.2451 | no | **distractor** — "portal password reset krna pdega" |
 | 4 | 0.2392 | no | unrelated |
-| 5 | 0.2373 | no | *"synthetic sample message"* — talks about the account |
+| 5 | 0.2373 | no | the chunk that *talks about* setting up the account |
 | **6** | **0.2315** | **yes** | the chunk holding the credential |
 
 **Chunks that discuss credentials outrank the chunk that contains one.** That is
@@ -182,10 +188,10 @@ Measured **2026-09-09**, `large` scale, identical 44 questions.
 | Metric | Vector | BM25 | Δ |
 |---|---|---|---|
 | Recall@1 | 57.9% | **65.8%** | **+7.9** |
-| Recall@3 | 73.7% | **81.6%** | **+7.9** |
+| Recall@3 | 71.1% | **81.6%** | **+10.5** |
 | Recall@5 | 76.3% | **86.8%** | **+10.5** |
 | Recall@10 | **92.1%** | 89.5% | −2.6 |
-| MRR | 0.682 | **0.749** | **+0.067** |
+| MRR | 0.677 | **0.749** | **+0.067** |
 | Latency (mean) | 15.9 ms | **2.9 ms** | **5.5× faster** |
 
 | Category | n | Vector R@1 | BM25 R@1 | Δ |
@@ -254,10 +260,10 @@ Measured **2026-09-09**, `large` scale, identical 44 questions, `RRF_K=60`,
 | Metric | Vector | BM25 | **RRF** |
 |---|---|---|---|
 | Recall@1 | 57.9% | **65.8%** | **65.8%** |
-| Recall@3 | 73.7% | 81.6% | **89.5%** |
+| Recall@3 | 71.1% | 81.6% | **89.5%** |
 | Recall@5 | 76.3% | 86.8% | **92.1%** |
 | Recall@10 | 92.1% | 89.5% | **92.1%** |
-| MRR | 0.682 | 0.749 | **0.779** |
+| MRR | 0.677 | 0.749 | **0.779** |
 | Latency (mean) | 15.9 ms | **2.9 ms** | 21.0 ms |
 | Separation | +0.0566 | +2.4848 | +0.0035 |
 
@@ -959,7 +965,7 @@ the default for credential-shaped queries specifically.
 Any Phase 2 change (BM25, hybrid, reranking, semantic chunking) must be measured
 at **`large` scale** against these numbers. The bar to beat:
 
-- **Recall@1 57.9%**, MRR **0.682**, latency **15.9 ms**
+- **Recall@1 57.9%**, MRR **0.677**, latency **15.9 ms**
 - `exact_term` Recall@1 **0.0%** — the main target
 - `credential` X1 at **rank 6** — must reach rank 1
 - separation **+0.0566** — the number reranking should move most

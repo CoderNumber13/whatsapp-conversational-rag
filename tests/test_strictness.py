@@ -29,13 +29,13 @@ from src.pipeline.strictness import (
 # an address sitting near talk of an account, and nothing calling either a
 # password. All values synthetic.
 _EXPORT = """\
-21/08/2026, 13:34 - Karan: synthetic sample message
+21/08/2026, 13:34 - Karan: can you set up a new gmail for the shared plan
 21/08/2026, 13:35 - Me: ok let me set it up
-21/08/2026, 13:40 - Me: synthetic sample message
+21/08/2026, 13:40 - Me: let me check the options
 21/08/2026, 14:29 - Me: @sample7handle
 21/08/2026, 14:30 - Me: testuser.sample@example.com
-21/08/2026, 16:47 - Karan: synthetic sample message
-21/08/2026, 17:41 - Me: synthetic sample message
+21/08/2026, 16:47 - Karan: go ahead and buy it, I will send the money
+21/08/2026, 17:41 - Me: done, please check and let me know
 25/07/2026, 20:02 - Rahul: Joining date is 2 September. Bangalore office.
 25/07/2026, 20:03 - Me: congrats!
 """

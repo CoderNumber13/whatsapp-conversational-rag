@@ -55,13 +55,13 @@ CREDENTIAL_EMAIL = "testuser.sample@example.com"  # synthetic
 
 CREDENTIAL_EXPORT_NAME = "WhatsApp Chat with Karan.txt"
 CREDENTIAL_EXPORT = """\
-21/08/2026, 13:34 - Karan: synthetic sample message
-21/08/2026, 13:34 - Me: synthetic sample message
-21/08/2026, 13:40 - Me: synthetic sample message
+21/08/2026, 13:34 - Karan: can you set up a new gmail for the shared plan
+21/08/2026, 13:34 - Me: sure, keeping the spend under ten dollars
+21/08/2026, 13:40 - Me: let me check the options
 21/08/2026, 14:29 - Me: @sample7handle
 21/08/2026, 14:30 - Me: testuser.sample@example.com
-21/08/2026, 16:47 - Karan: synthetic sample message
-21/08/2026, 17:41 - Me: synthetic sample message
+21/08/2026, 16:47 - Karan: go ahead and buy it, I will send the money
+21/08/2026, 17:41 - Me: done, please check and let me know
 """
 
 

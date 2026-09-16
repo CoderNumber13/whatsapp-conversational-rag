@@ -51,8 +51,8 @@ _CRED_OPENING = [
     ("Karan", "August end maanle"),
     ("Me", "20$ right?"),
     ("Karan", "Ha"),
-    ("Karan", "synthetic sample message"),
-    ("Me", "synthetic sample message"),
+    ("Karan", "can you set up a new gmail for the shared plan"),
+    ("Me", "sure, keeping the spend under ten dollars"),
     ("Karan", "Uspe lenge"),
     ("Me", "Us plan pe"),
     ("Karan", "Arey nhi bhai usme aisa nhi hota limit ka chakker"),
@@ -67,7 +67,7 @@ _CRED_OPENING = [
     ("Karan", "So aisa kuch nhi hai jo tu smjh rha ye alg pack hai"),
     ("Karan", "Mujhe ek project banana hai"),
     ("Karan", "Nhi hai bhai hourly basis pr hai"),
-    ("Me", "synthetic sample message"),
+    ("Me", "let me check the options"),
 ]
 
 # the two messages the benchmark expects — buried here, unlabelled
@@ -82,7 +82,7 @@ _CRED_TAIL = [
     ("Karan", "Paise bhej dunga mai sham se start Krna hai"),
     ("Me", "Please give me 10 mins"),
     ("Karan", "I give you 1 hr"),
-    ("Me", "synthetic sample message"),
+    ("Me", "done, please check and let me know"),
     ("Karan", "Aja ab room pe"),
     ("Me", "Are you there in your room?"),
     ("Karan", "Yes"),
