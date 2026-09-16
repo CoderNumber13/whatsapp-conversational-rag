@@ -263,7 +263,7 @@ def test_unlabelled_credential_is_reachable_only_by_its_own_token(searcher):
 @pytest.fixture(scope="module")
 def large_searcher(tmp_path_factory):
     """BM25 over the production-scale corpus. Needed for the credential case:
-    at sample scale the credential shares its chunk with "synthetic sample message", so
+    at sample scale the credential shares its chunk with the word "gmail", so
     the query matches on "gmail" and the failure is invisible."""
     from src.evaluation.corpus import generate_large_corpus
 

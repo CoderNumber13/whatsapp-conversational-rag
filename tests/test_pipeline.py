@@ -75,24 +75,24 @@ def _pipeline_over(tmp_path, monkeypatch, export_text, *, me="You", **env):
 # earlier version of this file committed one to git history.
 
 _NO_CREDENTIAL_EXPORT = """\
-21/08/2026, 13:34 - Karan: synthetic sample message
-21/08/2026, 13:34 - You: synthetic sample message
-21/08/2026, 13:40 - You: synthetic sample message
+21/08/2026, 13:34 - Karan: can you set up a new gmail for the shared plan
+21/08/2026, 13:34 - You: sure, keeping the spend under ten dollars
+21/08/2026, 13:40 - You: let me check the options
 21/08/2026, 14:30 - You: testuser.sample@example.com
-21/08/2026, 16:47 - Karan: synthetic sample message
-21/08/2026, 17:41 - You: synthetic sample message
+21/08/2026, 16:47 - Karan: go ahead and buy it, I will send the money
+21/08/2026, 17:41 - You: done, please check and let me know
 """
 
 # Same conversation, but with an unlabelled credential token at 14:29 — the
 # shape of the real export. "@sample7handle" stands in for the real value.
 _UNLABELLED_CREDENTIAL_EXPORT = """\
-21/08/2026, 13:34 - Karan: synthetic sample message
-21/08/2026, 13:34 - You: synthetic sample message
-21/08/2026, 13:40 - You: synthetic sample message
+21/08/2026, 13:34 - Karan: can you set up a new gmail for the shared plan
+21/08/2026, 13:34 - You: sure, keeping the spend under ten dollars
+21/08/2026, 13:40 - You: let me check the options
 21/08/2026, 14:29 - You: @sample7handle
 21/08/2026, 14:30 - You: testuser.sample@example.com
-21/08/2026, 16:47 - Karan: synthetic sample message
-21/08/2026, 17:41 - You: synthetic sample message
+21/08/2026, 16:47 - Karan: go ahead and buy it, I will send the money
+21/08/2026, 17:41 - You: done, please check and let me know
 """
 
 

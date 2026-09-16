@@ -153,7 +153,7 @@ def test_embedding_view_strips_tags_and_timestamps_but_keeps_content():
     raw = (
         "Conversation: chat (direct) | Participants: A, You\n"
         "Dates: 2026-08-21 13:34 - 2026-08-21 14:30\n"
-        "[2026-08-21 13:34] A: synthetic sample message  [m:48a93cb88e43aaaa]\n"
+        "[2026-08-21 13:34] A: can you set up a new gmail  [m:48a93cb88e43aaaa]\n"
         "[2026-08-21 14:30] You: mail bhej diya  [m:e8586b63d1b6bbbb]"
     )
     view = render_embedding_text(raw)
@@ -161,7 +161,7 @@ def test_embedding_view_strips_tags_and_timestamps_but_keeps_content():
     assert "[m:" not in view, "citation tags must not be embedded"
     assert "2026-08-21 13:34]" not in view, "per-line timestamps must not be embedded"
     # content and speakers survive; the chunk's own date header survives
-    assert "synthetic sample message" in view
+    assert "can you set up a new gmail" in view
     assert "mail bhej diya" in view
     assert "A:" in view and "You:" in view
     assert "Dates: 2026-08-21 13:34 - 2026-08-21 14:30" in view
